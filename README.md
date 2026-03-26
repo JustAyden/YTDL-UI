@@ -1,7 +1,7 @@
 # YTDL-UI
 
 A clean, self-hosted web UI for downloading YouTube videos and audio — powered by [yt-dlp](https://github.com/yt-dlp/yt-dlp) and [ffmpeg](https://ffmpeg.org). No accounts, no tracking, no ads.
-
+![Sample UI Image](https://github.com/JustAyden/YTDL-UI/blob/main/111.png?raw=true)
 > Made by [@JustAyden](https://github.com/JustAyden) & [@dash1101](https://github.com/dash1101)
 
 ---
