@@ -5,4 +5,4 @@ If you run into any issues using this please let me know.
 
 
 
-"pip install flask flask-cors yt-dlp"
+pip install flask flask-cors yt-dlp
