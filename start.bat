@@ -16,8 +16,7 @@ if errorlevel 1 (
 
 echo.
 echo  Starting YTDL-UI...
-echo  Open http://localhost:5000 in your browser.
 echo.
 
-python server.py
+python server.py %*
 pause

@@ -12,6 +12,7 @@ import threading
 import time
 import uuid
 import logging
+import argparse # Added argparse
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -355,10 +356,16 @@ def api_clear_tmp():
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="YTDLUI Server")
+    parser.add_argument("-p", "--port", type=int, default=5000, help="Port to run the server on")
+    args = parser.parse_args()
+
+    port = args.port
+
     print()
     print("  ┌──────────────────────────────┐")
-    print("  │  YTDLUI v1.2.0              │")
-    print("  │  http://localhost:5000       │")
+    print("  │  YTDLUI v1.2.0               │")
+    print(f"  │  {f'http://localhost:{port}':<26}│")
     print("  └──────────────────────────────┘")
     print()
-    app.run(host="0.0.0.0", port=5000, debug=False, threaded=True)
+    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
