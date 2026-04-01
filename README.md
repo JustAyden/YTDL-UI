@@ -76,23 +76,6 @@ Download links:
 
 See **[SETUP.md](SETUP.md)** for a full guide on running YTDL-UI behind Caddy on a Debian server with automatic HTTPS.
 
----
-
-## Project Structure
-
-```
-YTDL-UI/
-├── server.py        Flask backend (API + static serving)
-├── index.html       Frontend — single file, no build needed
-├── requirements.txt Python dependencies
-├── start.bat        Windows launcher
-├── start.sh         Linux/macOS launcher
-├── SETUP.md         Server deployment guide
-└── CLAUDE.md        AI assistant context
-```
-
----
-
 ## API
 
 | Endpoint | Method | Body | Description |
