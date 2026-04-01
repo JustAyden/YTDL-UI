@@ -365,7 +365,7 @@ if __name__ == "__main__":
     print()
     print("  ┌──────────────────────────────┐")
     print("  │  YTDLUI v1.2.0               │")
-    print(f"  │  {f'http://localhost:{port}':<26}│")
+    print(f"  │  {f'http://localhost:{port}':<26}  │")
     print("  └──────────────────────────────┘")
     print()
     app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
