@@ -230,15 +230,16 @@
 
     .thumb-wrap {
       flex-shrink: 0;
-      width: 116px;
-      height: 66px;
+      max-width: 180px;
+      min-width: 80px;
+      width: 25%;
       border-radius: 6px;
       overflow: hidden;
       background: var(--bg-alt);
       border: 1px solid var(--border);
     }
 
-    .thumb-wrap img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .thumb-wrap img { width: 100%; height: auto; object-fit: contain; display: block; }
 
     .info-meta { flex: 1; min-width: 0; }
 
@@ -419,6 +420,99 @@
     .footer-credits a { color: var(--text-muted); }
     .footer-credits a:hover { color: var(--cyan); }
 
+    /* ── Modal ─────────────────────────────────────────────────── */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 200;
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(4px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
+    }
+
+    .modal-overlay.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .modal {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px 28px 22px;
+      max-width: 520px;
+      width: 90%;
+      max-height: 80vh;
+      overflow-y: auto;
+      transform: translateY(12px);
+      transition: transform 0.2s;
+    }
+
+    .modal-overlay.open .modal { transform: translateY(0); }
+
+    .modal h2 {
+      font-size: 1.05rem;
+      font-weight: 700;
+      margin-bottom: 18px;
+      color: var(--cyan);
+    }
+
+    .modal-section {
+      margin-bottom: 14px;
+    }
+
+    .modal-section-title {
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+      font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    }
+
+    .modal-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .modal-tag {
+      padding: 3px 10px;
+      border-radius: 5px;
+      font-size: 0.75rem;
+      background: var(--bg-alt);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    }
+
+    .modal-close {
+      margin-top: 16px;
+      width: 100%;
+      padding: 9px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: var(--bg-alt);
+      color: var(--text-muted);
+      font-size: 0.82rem;
+      font-weight: 500;
+      cursor: pointer;
+      font-family: inherit;
+      transition: border-color 0.15s, color 0.15s;
+    }
+
+    .modal-close:hover {
+      border-color: var(--cyan-dim);
+      color: var(--text);
+    }
+
+    .modal::-webkit-scrollbar { width: 4px; }
+    .modal::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
     /* ── Utility ───────────────────────────────────────────────── */
     .hidden { display: none !important; }
 
@@ -432,7 +526,7 @@
     @media (max-width: 560px) {
       main { padding: 44px 16px 60px; }
       .hero h1 { font-size: 2rem; }
-      .thumb-wrap { width: 90px; height: 51px; }
+      .thumb-wrap { max-width: 110px; }
       .nav-links { gap: 12px; }
       .nav-gh span { display: none; }
     }
@@ -445,6 +539,7 @@
   <div class="nav-inner">
     <a class="nav-logo" href="/">ytdl-ui</a>
     <div class="nav-links">
+      <a href="#" onclick="togglePlatforms(event)">Platforms</a>
       <a href="https://github.com/yt-dlp/yt-dlp" target="_blank" rel="noopener">yt-dlp</a>
       <a href="https://github.com/JustAyden/YTDL-UI" target="_blank" rel="noopener" class="nav-gh">
         <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
@@ -468,7 +563,7 @@
 
   <!-- Hero -->
   <div class="hero">
-    <div class="badge">v1.1.0 &nbsp;·&nbsp; yt-dlp + ffmpeg</div>
+    <div class="badge">v1.2.0 &nbsp;·&nbsp; yt-dlp + ffmpeg</div>
     <h1>Download anything.</h1>
     <p class="hero-sub">Paste a YouTube link — or a playlist URL — to save it as video or audio. No accounts, no tracking.</p>
   </div>
@@ -565,6 +660,110 @@
     <a href="https://github.com/JustAyden/YTDL-UI" target="_blank" rel="noopener">source</a>
   </div>
 </footer>
+
+<!-- ── Supported Platforms Modal ────────────────────────────────────── -->
+<div class="modal-overlay" id="platforms-modal" onclick="closePlatforms(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <h2>Supported Platforms</h2>
+
+    <div class="modal-section">
+      <div class="modal-section-title">Video</div>
+      <div class="modal-tags">
+        <span class="modal-tag">YouTube</span>
+        <span class="modal-tag">Vimeo</span>
+        <span class="modal-tag">Dailymotion</span>
+        <span class="modal-tag">Twitch</span>
+        <span class="modal-tag">Facebook</span>
+        <span class="modal-tag">Instagram</span>
+        <span class="modal-tag">TikTok</span>
+        <span class="modal-tag">Twitter / X</span>
+        <span class="modal-tag">Reddit</span>
+      </div>
+    </div>
+
+    <div class="modal-section">
+      <div class="modal-section-title">Asian Platforms</div>
+      <div class="modal-tags">
+        <span class="modal-tag">Bilibili</span>
+        <span class="modal-tag">NicoNico</span>
+        <span class="modal-tag">Weibo</span>
+        <span class="modal-tag">Youku</span>
+        <span class="modal-tag">iQIYI</span>
+        <span class="modal-tag">Naver TV</span>
+        <span class="modal-tag">V Live</span>
+      </div>
+    </div>
+
+    <div class="modal-section">
+      <div class="modal-section-title">Streaming</div>
+      <div class="modal-tags">
+        <span class="modal-tag">Crunchyroll</span>
+        <span class="modal-tag">Funimation</span>
+        <span class="modal-tag">DAZN</span>
+        <span class="modal-tag">Peacock</span>
+        <span class="modal-tag">Pluto TV</span>
+        <span class="modal-tag">Tubi</span>
+      </div>
+    </div>
+
+    <div class="modal-section">
+      <div class="modal-section-title">Music</div>
+      <div class="modal-tags">
+        <span class="modal-tag">SoundCloud</span>
+        <span class="modal-tag">Bandcamp</span>
+        <span class="modal-tag">Mixcloud</span>
+        <span class="modal-tag">Audiomack</span>
+      </div>
+    </div>
+
+    <div class="modal-section">
+      <div class="modal-section-title">News & Media</div>
+      <div class="modal-tags">
+        <span class="modal-tag">BBC</span>
+        <span class="modal-tag">CNN</span>
+        <span class="modal-tag">NBC</span>
+        <span class="modal-tag">CBS</span>
+        <span class="modal-tag">ABC</span>
+        <span class="modal-tag">The Guardian</span>
+        <span class="modal-tag">Reuters</span>
+      </div>
+    </div>
+
+    <div class="modal-section">
+      <div class="modal-section-title">Magazines</div>
+      <div class="modal-tags">
+        <span class="modal-tag">Allure</span>
+        <span class="modal-tag">Ars Technica</span>
+        <span class="modal-tag">Bon App&eacute;tit</span>
+        <span class="modal-tag">GQ</span>
+        <span class="modal-tag">Vogue</span>
+        <span class="modal-tag">Wired</span>
+        <span class="modal-tag">Vanity Fair</span>
+        <span class="modal-tag">The New Yorker</span>
+      </div>
+    </div>
+
+    <div class="modal-section">
+      <div class="modal-section-title">Education</div>
+      <div class="modal-tags">
+        <span class="modal-tag">Udemy</span>
+        <span class="modal-tag">Khan Academy</span>
+        <span class="modal-tag">TED</span>
+      </div>
+    </div>
+
+    <div class="modal-section">
+      <div class="modal-section-title">Sports</div>
+      <div class="modal-tags">
+        <span class="modal-tag">ESPN</span>
+        <span class="modal-tag">Sky Sports</span>
+        <span class="modal-tag">+ regional networks</span>
+      </div>
+    </div>
+
+    <button class="modal-close" onclick="closePlatforms()">Close</button>
+  </div>
+</div>
 
 <script>
   // ── State ──────────────────────────────────────────────────────
@@ -804,8 +1003,14 @@
 
     } catch (err) {
       finishProgress(false);
-      logLine(`  Error: ${err.message}`, "log-err");
-      setAlert(dlAlert, "error", `&#x2715;&nbsp; ${err.message}`);
+      const cleared = await handleStorageError(err.message);
+      if (cleared) {
+        logLine("  Temp files cleared. Try downloading again.", "log-info");
+        setAlert(dlAlert, "warn", "&#x26A0;&nbsp; Temp files cleared — try downloading again.");
+      } else {
+        logLine(`  Error: ${err.message}`, "log-err");
+        setAlert(dlAlert, "error", `&#x2715;&nbsp; ${err.message}`);
+      }
     } finally {
       dlBtn.disabled = false;
       zipBtn.disabled = false;
@@ -850,8 +1055,14 @@
 
     } catch (err) {
       finishProgress(false);
-      logLine(`  Error: ${err.message}`, "log-err");
-      setAlert(dlAlert, "error", `&#x2715;&nbsp; ${err.message}`);
+      const cleared = await handleStorageError(err.message);
+      if (cleared) {
+        logLine("  Temp files cleared. Try downloading again.", "log-info");
+        setAlert(dlAlert, "warn", "&#x26A0;&nbsp; Temp files cleared — try downloading again.");
+      } else {
+        logLine(`  Error: ${err.message}`, "log-err");
+        setAlert(dlAlert, "error", `&#x2715;&nbsp; ${err.message}`);
+      }
     } finally {
       dlBtn.disabled = false;
       zipBtn.disabled = false;
@@ -867,6 +1078,41 @@
     a.click();
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  }
+
+  // ── Supported Platforms modal ───────────────────────────────
+  function togglePlatforms(e) {
+    if (e) e.preventDefault();
+    document.getElementById("platforms-modal").classList.toggle("open");
+  }
+
+  function closePlatforms(e) {
+    if (e && e.target !== e.currentTarget) return;
+    document.getElementById("platforms-modal").classList.remove("open");
+  }
+
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape") closePlatforms();
+  });
+
+  // ── Storage error recovery ──────────────────────────────────
+  async function tryClearTmp() {
+    try {
+      const res = await fetch("/api/clear-tmp", { method: "POST" });
+      const d   = await res.json();
+      logLine(`  Cleared ${d.cleared} temp item(s) — retrying…`, "log-info");
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function handleStorageError(errMsg) {
+    if (errMsg && errMsg.includes("STORAGE_ERROR")) {
+      logLine("  Storage issue detected — clearing temp files…", "log-info");
+      return await tryClearTmp();
+    }
+    return false;
   }
 </script>
 </body>

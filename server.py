@@ -36,6 +36,7 @@ INFO_TIMEOUT       = 30
 DOWNLOAD_TIMEOUT   = 600
 PLAYLIST_TIMEOUT   = 7200   # 2 hours for large playlists
 CLEANUP_DELAY      = 120
+TMP_PURGE_INTERVAL = 3600   # purge .tmp contents every hour
 
 # ── Binary detection ──────────────────────────────────────────────────────────
 def _find_bin(win_name, unix_name):
@@ -69,6 +70,31 @@ def cleanup_later(path, delay=CLEANUP_DELAY):
                 pass
     threading.Thread(target=_rm, daemon=True).start()
 
+def purge_tmp():
+    """Remove everything inside TEMP_DIR."""
+    count = 0
+    for name in os.listdir(TEMP_DIR):
+        p = os.path.join(TEMP_DIR, name)
+        try:
+            if os.path.isdir(p):
+                shutil.rmtree(p, ignore_errors=True)
+            else:
+                os.remove(p)
+            count += 1
+        except Exception:
+            pass
+    return count
+
+def _tmp_purge_loop():
+    """Background thread: purge .tmp every TMP_PURGE_INTERVAL seconds."""
+    while True:
+        time.sleep(TMP_PURGE_INTERVAL)
+        removed = purge_tmp()
+        if removed:
+            log.info("Periodic cleanup: removed %d item(s) from .tmp", removed)
+
+threading.Thread(target=_tmp_purge_loop, daemon=True).start()
+
 def classify_error(stderr):
     s = (stderr or "").lower()
     if "private video" in s or "this video is private" in s:
@@ -83,6 +109,9 @@ def classify_error(stderr):
         return "This video is blocked due to copyright."
     if "age" in s and "restricted" in s:
         return "This video is age-restricted."
+    if any(k in s for k in ("no space left", "disk full", "errno 28", "not enough space",
+                             "oserror", "write error", "permission denied")):
+        return "STORAGE_ERROR: Not enough disk space or write error."
     return "Could not process that URL. Check it and try again."
 
 def build_video_cmd(base, fmt, quality, url):
@@ -153,12 +182,20 @@ def api_info():
     # ── Playlist ──────────────────────────────────────────────────
     if meta.get("_type") == "playlist":
         entries = meta.get("entries") or []
+        # Prefer playlist-level thumbnail, then thumbnails list, then first entry
+        thumb = meta.get("thumbnail") or ""
+        if not thumb:
+            thumbs = meta.get("thumbnails")
+            if thumbs:
+                thumb = thumbs[-1].get("url", "")
+        if not thumb and entries:
+            thumb = entries[0].get("thumbnail") or entries[0].get("thumbnails", [{}])[-1].get("url", "")
         return jsonify({
             "type":      "playlist",
             "title":     meta.get("title") or meta.get("id", "Playlist"),
             "uploader":  meta.get("uploader") or meta.get("channel", ""),
             "count":     len(entries),
-            "thumbnail": (entries[0].get("thumbnail") or "") if entries else "",
+            "thumbnail": thumb,
         })
 
     # ── Single video ──────────────────────────────────────────────
@@ -309,11 +346,18 @@ def api_download_playlist():
                      download_name="playlist.zip")
 
 
+@app.route("/api/clear-tmp", methods=["POST"])
+def api_clear_tmp():
+    removed = purge_tmp()
+    log.info("Manual cleanup: removed %d item(s) from .tmp", removed)
+    return jsonify({"cleared": removed})
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     print()
     print("  ┌──────────────────────────────┐")
-    print("  │  YTDLUI v1.1.0              │")
+    print("  │  YTDLUI v1.2.0              │")
     print("  │  http://localhost:5000       │")
     print("  └──────────────────────────────┘")
     print()
