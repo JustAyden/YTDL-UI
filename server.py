@@ -1,5 +1,7 @@
 from flask import Flask, request, jsonify, send_from_directory, send_file
 from flask_cors import CORS
+from urllib.parse import urlparse
+from collections import defaultdict
 import subprocess
 import json
 import os
@@ -12,7 +14,7 @@ import threading
 import time
 import uuid
 import logging
-import argparse # Added argparse
+import argparse
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -24,7 +26,52 @@ log = logging.getLogger(__name__)
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = Flask(__name__, static_folder=".")
-CORS(app)
+# Restrict CORS to same origin only — no cross-origin API access
+CORS(app, origins=[])
+
+# ── Security: Rate limiting ───────────────────────────────────────────────────
+# Max requests per window per IP
+RATE_LIMIT         = 10          # requests
+RATE_WINDOW        = 60          # seconds
+_rate_counts: dict = defaultdict(list)
+_rate_lock         = threading.Lock()
+
+def is_rate_limited(ip: str) -> bool:
+    now = time.time()
+    with _rate_lock:
+        hits = _rate_counts[ip]
+        # Drop entries outside the window
+        _rate_counts[ip] = [t for t in hits if now - t < RATE_WINDOW]
+        if len(_rate_counts[ip]) >= RATE_LIMIT:
+            log.warning("Rate limit hit for IP %s", ip)
+            return True
+        _rate_counts[ip].append(now)
+        return False
+
+# ── Security: URL validation ──────────────────────────────────────────────────
+# Only allow http/https with a real hostname — blocks file://, local IPs used
+# as SSRF vectors, and anything that isn't a normal web URL.
+_LOCAL_NETS = re.compile(
+    r"^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|::1|0\.0\.0\.0)",
+    re.IGNORECASE,
+)
+
+def validate_url(url: str) -> str | None:
+    """Return None if URL is safe, or an error string if it should be rejected."""
+    if not url:
+        return "No URL provided."
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return "Invalid URL."
+    if parsed.scheme not in ("http", "https"):
+        return "Only http and https URLs are supported."
+    host = parsed.hostname or ""
+    if not host:
+        return "URL has no hostname."
+    if _LOCAL_NETS.match(host):
+        return "Local/private URLs are not allowed."
+    return None
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMP_DIR   = os.path.join(SCRIPT_DIR, ".tmp")
@@ -156,10 +203,13 @@ def index():
 
 @app.route("/api/info", methods=["POST"])
 def api_info():
+    if is_rate_limited(request.remote_addr):
+        return jsonify({"error": "Too many requests. Please wait a moment."}), 429
     data = request.get_json(silent=True) or {}
     url  = (data.get("url") or "").strip()
-    if not url:
-        return jsonify({"error": "No URL provided."}), 400
+    err = validate_url(url)
+    if err:
+        return jsonify({"error": err}), 400
 
     # Detect playlist vs single video using --flat-playlist --dump-single-json
     try:
@@ -239,13 +289,16 @@ def api_info():
 
 @app.route("/api/download", methods=["POST"])
 def api_download():
+    if is_rate_limited(request.remote_addr):
+        return jsonify({"error": "Too many requests. Please wait a moment."}), 429
     data    = request.get_json(silent=True) or {}
     url     = (data.get("url")     or "").strip()
     fmt     = (data.get("format")  or "mp4").lower()
     quality = (data.get("quality") or "").strip()
 
-    if not url:
-        return jsonify({"error": "No URL provided."}), 400
+    err = validate_url(url)
+    if err:
+        return jsonify({"error": err}), 400
 
     work_dir = os.path.join(TEMP_DIR, uuid.uuid4().hex)
     os.makedirs(work_dir, exist_ok=True)
@@ -290,13 +343,16 @@ def api_download():
 
 @app.route("/api/download-playlist", methods=["POST"])
 def api_download_playlist():
+    if is_rate_limited(request.remote_addr):
+        return jsonify({"error": "Too many requests. Please wait a moment."}), 429
     data    = request.get_json(silent=True) or {}
     url     = (data.get("url")     or "").strip()
     fmt     = (data.get("format")  or "mp3").lower()
     quality = (data.get("quality") or "192k").strip()
 
-    if not url:
-        return jsonify({"error": "No URL provided."}), 400
+    err = validate_url(url)
+    if err:
+        return jsonify({"error": err}), 400
 
     work_dir = os.path.join(TEMP_DIR, uuid.uuid4().hex)
     os.makedirs(work_dir, exist_ok=True)
@@ -357,15 +413,25 @@ def api_clear_tmp():
 # ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="YTDLUI Server")
-    parser.add_argument("-p", "--port", type=int, default=5000, help="Port to run the server on")
+    parser.add_argument("-p", "--port", type=int, default=5000,
+                        help="Port to run the server on (default: 5000)")
+    parser.add_argument("--host", type=str, default="127.0.0.1",
+                        help="Host address to bind to. Use 0.0.0.0 for local network "
+                             "access (default: 127.0.0.1 — localhost/tunnel only)")
     args = parser.parse_args()
 
     port = args.port
+    host = args.host
 
+    access_url = f"http://{host if host != '0.0.0.0' else 'YOUR_IP'}:{port}"
     print()
     print("  ┌──────────────────────────────┐")
-    print("  │  YTDLUI v1.2.0               │")
-    print(f"  │  {f'http://localhost:{port}':<26}  │")
+    print("  │  YTDLUI v1.2.1               │")
+    print(f"  │  {access_url:<26}  │")
+    print(f"  │  bound to {host:<20}  │")
     print("  └──────────────────────────────┘")
     print()
-    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
+    if host == "0.0.0.0":
+        log.warning("Binding to 0.0.0.0 — accessible on all network interfaces.")
+        log.warning("Make sure this is intentional and your network is trusted.")
+    app.run(host=host, port=port, debug=False, threaded=True)

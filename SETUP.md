@@ -6,7 +6,7 @@ How to run YTDLUI on Windows (quick start) or deploy it on a Debian server behin
 
 ## Windows — Quick Start
 
-The repo ships with bundled `yt-dlp.exe` and `ffmpeg.exe`, so the only thing you need to install is Python.
+Download and install YT-DLP and FFMpeg
 
 ### 1. Install Python
 

@@ -1,0 +1,52 @@
+[Unit]
+Description=YTDL-UI — yt-dlp web frontend
+After=network.target
+Wants=network.target
+
+[Service]
+# Dedicated unprivileged user — created by install.sh
+User=ytdlui
+Group=ytdlui
+
+# Absolute path to your app directory — update if different
+WorkingDirectory=/opt/ytdlui
+ExecStart=/usr/bin/python3 /opt/ytdlui/server.py --port 5000 --host 127.0.0.1
+
+# Restart automatically on crash
+Restart=on-failure
+RestartSec=5
+
+# ── Hardening ────────────────────────────────────────────────────
+# Prevent privilege escalation
+NoNewPrivileges=true
+
+# Read-only filesystem except for the tmp dir the app needs
+ProtectSystem=strict
+ReadWritePaths=/opt/ytdlui/.tmp
+
+# Hide /home, /root from the process
+ProtectHome=true
+
+# No access to hardware devices
+PrivateDevices=true
+
+# Isolate temp directory
+PrivateTmp=true
+
+# Restrict syscalls to a safe subset
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# Prevent writing to kernel variables
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+# Restrict address families to inet only (no unix sockets, no raw)
+RestrictAddressFamilies=AF_INET AF_INET6
+
+# Kill entire process group on stop
+KillMode=mixed
+
+[Install]
+WantedBy=multi-user.target
