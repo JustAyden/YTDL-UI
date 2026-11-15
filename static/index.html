@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#0d1117" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f6f8fa" media="(prefers-color-scheme: light)">
+  <meta name="description" content="Self-hosted video and audio downloader powered by yt-dlp.">
+  <title>YTDL-UI — Video Downloader</title>
+  <link rel="icon" href="static/img/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="static/img/icon-192.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="static/css/app.css?v=__VERSION__">
+  <script type="module" src="static/js/app.js?v=__VERSION__"></script>
+</head>
+<body>
+
+<nav>
+  <div class="nav-inner">
+    <a class="nav-logo" href="./"><img src="static/img/icon.svg" alt="">ytdl-ui</a>
+    <div class="nav-links">
+      <button class="link" type="button" id="open-sites">Sites</button>
+      <a class="nav-hide-sm" href="https://github.com/yt-dlp/yt-dlp" target="_blank" rel="noopener">yt-dlp</a>
+      <a href="https://github.com/JustAyden/YTDL-UI" target="_blank" rel="noopener" class="nav-gh">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        <span>GitHub</span>
+      </a>
+      <button class="icon-btn hidden" type="button" id="open-admin" aria-label="Admin panel" title="Admin">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
+        <span class="dot hidden" id="admin-dot"></span>
+      </button>
+    </div>
+  </div>
+</nav>
+
+<main>
+  <div class="hero">
+    <div class="badge" id="version-badge">v__VERSION__ &nbsp;·&nbsp; yt-dlp + ffmpeg</div>
+    <h1>Download anything.</h1>
+    <p class="hero-sub">Paste a link from YouTube or one of 1,800+ other sites to save it as video or audio. No accounts, no tracking.</p>
+  </div>
+
+  <!-- URL -->
+  <form class="card" id="url-form" autocomplete="off">
+    <label class="sr-only" for="url-input">Video or playlist link</label>
+    <div class="input-row">
+      <div class="url-wrap">
+        <input type="url" id="url-input" class="url-input" inputmode="url" spellcheck="false"
+               placeholder="https://youtube.com/watch?v=…  or a playlist link" required>
+        <button type="button" class="paste-btn" id="paste-btn" title="Paste from clipboard">paste</button>
+      </div>
+      <button class="btn btn-primary" id="fetch-btn" type="submit">Fetch</button>
+    </div>
+    <div id="fetch-alert" aria-live="polite"></div>
+  </form>
+
+  <!-- Info -->
+  <section class="card fade-in hidden" id="info-card" aria-label="Media details">
+    <div class="info-row">
+      <div class="thumb-wrap"><img id="thumb" alt="" referrerpolicy="no-referrer"></div>
+      <div class="info-meta">
+        <div id="info-title" class="info-title"></div>
+        <div id="info-detail" class="info-detail"></div>
+        <div id="info-pills"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Options -->
+  <section class="card fade-in hidden" id="dl-panel" aria-label="Download options">
+    <div class="tabs" role="tablist">
+      <button class="tab active" id="tab-video" type="button" role="tab" aria-selected="true">Video</button>
+      <button class="tab" id="tab-audio" type="button" role="tab" aria-selected="false">Audio</button>
+    </div>
+
+    <div class="section-label">Format <span class="note" id="format-note"></span></div>
+    <div class="chip-row" id="format-chips" role="radiogroup" aria-label="Format"></div>
+
+    <div id="quality-wrap">
+      <div class="section-label" id="quality-label">Quality</div>
+      <div class="chip-row" id="quality-chips" role="radiogroup" aria-label="Quality"></div>
+    </div>
+
+    <div id="playlist-wrap" class="hidden">
+      <div class="pl-head">
+        <div class="section-label" id="pl-count">Items</div>
+        <div class="pl-actions">
+          <button type="button" class="btn-link" id="pl-all">Select all</button>
+          <button type="button" class="btn-link" id="pl-none">None</button>
+        </div>
+      </div>
+      <div class="pl-list" id="pl-list" role="group" aria-label="Playlist items"></div>
+    </div>
+
+    <div class="opt-row">
+      <div class="opt-text"><label for="embed-toggle">Embed metadata &amp; cover art</label>
+        <small id="embed-note">Title, artist and thumbnail inside the file</small></div>
+      <label class="switch"><input type="checkbox" id="embed-toggle"><span></span></label>
+    </div>
+
+    <div class="opt-row hidden" id="zip-row">
+      <div class="opt-text"><label for="zip-toggle">Bundle into one ZIP</label>
+        <small>Otherwise each file is saved separately</small></div>
+      <label class="switch"><input type="checkbox" id="zip-toggle" checked><span></span></label>
+    </div>
+
+    <div class="opt-row hidden" id="proc-row">
+      <div class="opt-text">Process on
+        <small id="proc-note"></small></div>
+      <div class="seg" role="radiogroup" aria-label="Where to process">
+        <button type="button" data-proc="server" role="radio">Server</button>
+        <button type="button" data-proc="browser" role="radio">This device</button>
+      </div>
+    </div>
+    <div class="hint hidden" id="proc-fixed" style="margin:-4px 0 14px"></div>
+
+    <button class="btn btn-primary btn-full" id="dl-btn" type="button">Download</button>
+    <div id="dl-alert" aria-live="polite"></div>
+  </section>
+
+  <!-- Downloads -->
+  <div class="card-title hidden" id="jobs-title">
+    <span>Downloads</span>
+    <button type="button" class="btn-link" id="clear-finished">Clear finished</button>
+  </div>
+  <div class="jobs" id="jobs" aria-live="polite"></div>
+</main>
+
+<footer>
+  powered by <a href="https://github.com/yt-dlp/yt-dlp" target="_blank" rel="noopener">yt-dlp</a>
+  &amp; <a href="https://ffmpeg.org" target="_blank" rel="noopener">ffmpeg</a>
+  <span id="footer-versions"></span>
+  <div>
+    made by <a href="https://github.com/JustAyden" target="_blank" rel="noopener">@JustAyden</a>
+    &amp; <a href="https://github.com/dash1101" target="_blank" rel="noopener">@dash1101</a>
+    &nbsp;·&nbsp; <a href="https://github.com/JustAyden/YTDL-UI" target="_blank" rel="noopener">source</a>
+  </div>
+</footer>
+
+<!-- Sites -->
+<dialog class="modal" id="sites-modal" aria-labelledby="sites-h">
+  <div class="modal-inner">
+    <h2 id="sites-h">Supported sites</h2>
+    <p>Anything <a href="https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md" target="_blank" rel="noopener">yt-dlp supports</a> — over 1,800 sites. Some popular ones:</p>
+    <div class="modal-section"><div class="modal-section-title">Video</div><div class="modal-tags">
+      <span class="modal-tag">YouTube</span><span class="modal-tag">Vimeo</span><span class="modal-tag">Dailymotion</span>
+      <span class="modal-tag">Twitch</span><span class="modal-tag">TikTok</span><span class="modal-tag">Instagram</span>
+      <span class="modal-tag">Facebook</span><span class="modal-tag">X / Twitter</span><span class="modal-tag">Reddit</span>
+      <span class="modal-tag">Bluesky</span><span class="modal-tag">Rumble</span><span class="modal-tag">PeerTube</span>
+    </div></div>
+    <div class="modal-section"><div class="modal-section-title">Music &amp; audio</div><div class="modal-tags">
+      <span class="modal-tag">YouTube Music</span><span class="modal-tag">SoundCloud</span><span class="modal-tag">Bandcamp</span>
+      <span class="modal-tag">Mixcloud</span><span class="modal-tag">Audiomack</span><span class="modal-tag">podcasts (RSS)</span>
+    </div></div>
+    <div class="modal-section"><div class="modal-section-title">International</div><div class="modal-tags">
+      <span class="modal-tag">Bilibili</span><span class="modal-tag">NicoNico</span><span class="modal-tag">Weibo</span>
+      <span class="modal-tag">Naver TV</span><span class="modal-tag">VK</span><span class="modal-tag">ARD / ZDF</span>
+    </div></div>
+    <div class="modal-section"><div class="modal-section-title">News, education &amp; more</div><div class="modal-tags">
+      <span class="modal-tag">BBC</span><span class="modal-tag">CNN</span><span class="modal-tag">NBC</span>
+      <span class="modal-tag">TED</span><span class="modal-tag">Khan Academy</span><span class="modal-tag">Internet Archive</span>
+      <span class="modal-tag">Ars Technica</span><span class="modal-tag">Wired</span>
+    </div></div>
+    <p id="sites-restricted" class="hidden"></p>
+    <p style="font-size:0.75rem">DRM-protected services (Netflix, Disney+, Spotify, …) can't be downloaded.</p>
+    <form method="dialog"><button class="btn btn-secondary btn-full modal-close">Close</button></form>
+  </div>
+</dialog>
+
+<!-- Admin -->
+<dialog class="modal" id="admin-modal" aria-labelledby="admin-h">
+  <div class="modal-inner">
+    <h2 id="admin-h"><span>Admin</span><form method="dialog"><button class="job-x" aria-label="Close">×</button></form></h2>
+    <form id="admin-login" class="hidden">
+      <p>Enter the admin password from this server's config.</p>
+      <div class="field">
+        <input type="password" id="admin-pass" autocomplete="current-password" aria-label="Admin password" required>
+        <button class="btn btn-primary" type="submit">Log in</button>
+      </div>
+      <div id="admin-login-alert"></div>
+    </form>
+    <div id="admin-panel" class="hidden"></div>
+  </div>
+</dialog>
+
+</body>
+</html>

@@ -1,0 +1,40 @@
+# runtime data
+data/
+.tmp/
+config.ini
+cookies.txt
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# build output
+build/
+dist/
+*.spec.bak
+
+# bundled tools dropped next to the app
+/yt-dlp
+/yt-dlp.exe
+/ffmpeg
+/ffmpeg.exe
+/ffprobe
+/ffprobe.exe
+/bin/
+
+# editors / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# local tooling
+.claude/
+
+# generated during Windows builds
+packaging/version_info.txt
