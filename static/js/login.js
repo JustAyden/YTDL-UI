@@ -1,3 +1,6 @@
+import { installShapes } from "./shapes.js";
+
+installShapes();
 const form = document.getElementById("login-form");
 const alertEl = document.getElementById("login-alert");
 

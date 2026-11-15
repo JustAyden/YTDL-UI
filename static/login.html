@@ -3,26 +3,32 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="color-scheme" content="dark light">
+  <meta name="color-scheme" content="light dark">
   <meta name="robots" content="noindex">
   <title>YTDL-UI — Sign in</title>
   <link rel="icon" href="static/img/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="static/css/theme.css?v=__VERSION__">
   <link rel="stylesheet" href="static/css/app.css?v=__VERSION__">
+  <script src="static/js/theme-boot.js?v=__VERSION__"></script>
   <script type="module" src="static/js/login.js?v=__VERSION__"></script>
+  <style>
+    .login { min-height: 100dvh; display: grid; place-items: center; padding: 24px 16px; }
+    .login .card { width: min(420px, 100%); padding: 32px 24px 28px; text-align: center; }
+    .login .hero-art { margin: 0 auto 20px; width: 112px; }
+    .login h1 { font-size: 32px; line-height: 40px; font-weight: 650; font-stretch: 112%; letter-spacing: -0.5px; }
+    .login p { color: var(--md-sys-color-on-surface-variant); margin: 8px 0 24px; font-size: 14px; line-height: 20px; }
+    .login .field { text-align: left; }
+  </style>
 </head>
 <body>
-<main style="max-width:420px;padding-top:12vh">
-  <div class="hero">
-    <div class="badge">ytdl-ui</div>
-    <h1 style="font-size:2.2rem">Private server</h1>
-    <p class="hero-sub">Enter the password to continue.</p>
-  </div>
+<main class="login">
   <form class="card" id="login-form">
+    <div class="hero-art" aria-hidden="true"><span class="s1"></span><span class="s2"></span><span class="msr">lock</span></div>
+    <h1>Private server</h1>
+    <p>Enter the password to use this YTDL-UI.</p>
     <label class="sr-only" for="pw">Password</label>
-    <div class="field" style="margin:0">
-      <input type="password" id="pw" autocomplete="current-password" required autofocus>
-      <button class="btn btn-primary" type="submit">Enter</button>
-    </div>
+    <div class="field"><input type="password" id="pw" autocomplete="current-password" placeholder="Password" required autofocus></div>
+    <button class="btn btn-filled m btn-full sl" type="submit"><span class="msr">key</span>Enter</button>
     <div id="login-alert" aria-live="polite"></div>
   </form>
 </main>

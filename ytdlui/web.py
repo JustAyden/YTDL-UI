@@ -43,7 +43,8 @@ FFMPEG_CORE_FILES = {
 }
 FFMPEG_CDN = f"https://cdn.jsdelivr.net/npm/@ffmpeg/core@{FFMPEG_CORE_VERSION}/dist/esm/"
 
-OPEN_PATHS = ("/api/health", "/api/login", "/static/css/", "/static/img/", "/static/js/login.js",
+OPEN_PATHS = ("/api/health", "/api/login", "/static/css/", "/static/img/", "/static/fonts/", "/static/js/login.js",
+              "/static/js/theme-boot.js", "/static/js/shapes.js",
               "/manifest.webmanifest", "/favicon.ico")
 
 
@@ -362,6 +363,7 @@ def create_app(settings: Settings, start_background: bool = True) -> Flask:
                 "ffmpeg_core": svc.ffmpeg_core_urls(),
             },
             "server_downloads": settings.server_downloads_enabled,
+            "ui": {"accent": settings.ui_accent, "style": settings.ui_style},
             "formats": {
                 "video": [{"id": k, **v} for k, v in VIDEO_FORMATS.items()],
                 "audio": [{"id": k, **v} for k, v in AUDIO_FORMATS.items()],
@@ -675,6 +677,11 @@ def create_app(settings: Settings, start_background: bool = True) -> Flask:
                 parsed[name] = None if raw is None else coerce_setting(name, raw)
             except ConfigError as exc:
                 return _err(str(exc))
+            if name == "ui_accent" and parsed[name] is not None:
+                import re as _re
+                if not _re.fullmatch(r"#[0-9a-fA-F]{6}", parsed[name]):
+                    return _err("ui_accent must be a hex color like #22d3ee.")
+                parsed[name] = parsed[name].lower()
         if any(ADMIN_EDITABLE[n][1] for n in parsed):
             if not svc.admin.check_second_factor(str(data.get("code") or "")):
                 return failed_login("admin", "Security settings need a current 2FA code.")

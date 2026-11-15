@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.4.0] — 2026-11-15
+
+### New
+- **Material 3 Expressive redesign.** The whole interface now follows Google's Material 3 Expressive
+  system:
+  - **Color:** every color role is generated from one seed with Material Color Utilities' 2025 color
+    spec, in light and dark.
+  - **Type and icons:** Roboto Flex with emphasized type, and Material Symbols with fill animations.
+  - **Shapes:** the M3 shape scale, plus expressive shapes. The cookie logo, the "sunny" hero, and job
+    thumbnails and color swatches morph between shapes.
+  - **Motion:** spring-based (bouncy spatial springs, calm effects springs). Buttons morph toward
+    square while pressed. Connected button groups replace tabs and segmented buttons. Filter chips,
+    M3 switches and grouped Android-16-style lists throughout.
+  - **Progress:** a wavy progress indicator for downloads, and the shape-morphing loading indicator.
+  - **Layout:** a list-detail layout with downloads in a side pane on large screens, a pill search
+    bar, snackbars and state layers with ripples.
+- **Settings** (⚙): theme (system/light/dark), color (9 palettes or any custom color), color style
+  (tonal, vibrant, expressive, faithful, neutral, mono), contrast (standard/medium/high), reduce motion,
+  auto-save finished downloads, and where to process downloads. The **Admin console** moved to the
+  bottom of Settings and opens as its own page.
+- Admins can set the default accent color and color style for visitors (`ui_accent`, `ui_style`,
+  also in Admin console → Settings).
+- Fonts, icons and the color library are self-hosted: visitors' browsers never contact Google.
+
 ## [2.3.0] — 2026-11-15
 
 ### New

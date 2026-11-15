@@ -1,4 +1,7 @@
 import { BrowserEngine, browserCapable, prefersBrowser, saveBlob } from "./engine.js";
+import { installShapes } from "./shapes.js";
+import { CONTRASTS, DEFAULT_SEED, DEFAULT_STYLE, PRESETS, STYLES, applyAppearance, isHex, loadAppearance,
+  saveAppearance, swatchColor } from "./theme.js";
 import { buildZip } from "./zip.js";
 
 // ── tiny helpers ────────────────────────────────────────────────────────
@@ -52,9 +55,26 @@ async function api(path, { method = "GET", body, signal } = {}) {
 }
 
 function alertBox(el, type, text, spinner = false) {
-  el.replaceChildren(h("div", { class: `alert alert-${type}`, role: type === "error" ? "alert" : null },
-    spinner ? h("span", { class: "spinner" }) : null, h("span", { text })));
+  el.replaceChildren(h("div", { class: `alert alert-${type}${spinner ? " loading" : ""}`, role: type === "error" ? "alert" : null },
+    spinner ? h("span", { class: "loader sm", "aria-hidden": "true" }) : null, h("span", { text })));
 }
+
+// ── snackbar ────────────────────────────────────────────────────────────
+let snackTimer = null;
+function toast(text, action) {
+  const bar = $("snackbar");
+  $("snackbar-text").textContent = text;
+  bar.querySelector("button")?.remove();
+  if (action) bar.append(h("button", { class: "btn btn-text", type: "button", text: action.label,
+    onclick: () => { bar.classList.remove("show"); action.run(); } }));
+  bar.classList.add("show");
+  clearTimeout(snackTimer);
+  snackTimer = setTimeout(() => bar.classList.remove("show"), action ? 6000 : 3500);
+}
+
+// ── per-visitor UI preferences ──────────────────────────────────────────
+const UI = Object.assign({ autosave: true }, store.get("ytdlui.ui", {}));
+const saveUI = () => store.set("ytdlui.ui", UI);
 const clear = (el) => el.replaceChildren();
 
 // ── state ───────────────────────────────────────────────────────────────
@@ -315,6 +335,14 @@ function renderZipRow() {
   const isPl = S.info?.type === "playlist";
   $("zip-row").classList.toggle("hidden", !(isPl && S.processing === "browser"));
   $("zip-toggle").checked = S.zip;
+  updateOptList();
+}
+
+function updateOptList() {
+  const rows = [...document.querySelectorAll("#opt-list > .opt-row")].filter((r) => !r.classList.contains("hidden"));
+  document.querySelectorAll("#opt-list > .opt-row").forEach((r) => r.classList.remove("first-visible", "last-visible"));
+  rows[0]?.classList.add("first-visible");
+  rows[rows.length - 1]?.classList.add("last-visible");
 }
 
 function updateDownloadButton() {
@@ -323,11 +351,12 @@ function updateDownloadButton() {
   const fmt = (S.format || "").toUpperCase();
   if (S.info.type === "playlist") {
     const n = S.selected.size;
-    btn.textContent = n ? `Download ${n} item${n === 1 ? "" : "s"} · ${fmt}` : "Select items to download";
+    btn.replaceChildren(h("span", { class: "msr", text: n ? "playlist_play" : "checklist" }),
+      h("span", { text: n ? `Download ${n} item${n === 1 ? "" : "s"} · ${fmt}` : "Select items to download" }));
     btn.disabled = n === 0;
   } else {
     const q = S.quality ? (S.quality === "best" ? "best quality" : S.quality) : "";
-    btn.textContent = `Download ${fmt}${q ? " · " + q : ""}`;
+    btn.replaceChildren(h("span", { class: "msr", text: "download" }), h("span", { text: `Download ${fmt}${q ? " · " + q : ""}` }));
     btn.disabled = !!S.info.too_long;
   }
 }
@@ -348,25 +377,25 @@ function addJob(j) {
   jobs.set(j.id, j);
   buildJobCard(j);
   renderJob(j);
-  $("jobs-title").classList.remove("hidden");
+  updateEmpty();
   if (j.mode === "server") persistServerJobs();
   return j;
 }
 
 function buildJobCard(j) {
-  const bar = h("div");
   j.el = {
     root: h("article", { class: "job" }),
     title: h("div", { class: "job-title" }),
     tags: h("div", { class: "job-tags" }),
-    bar: h("div", { class: "bar" }, bar), fill: bar,
+    bar: h("div", { class: "progress", role: "progressbar", "aria-valuemin": "0", "aria-valuemax": "100" },
+      h("div", { class: "ind" }), h("div", { class: "trk" })),
     st: h("span", { class: "st" }),
     actions: h("div", { class: "job-actions" }),
     files: h("div", { class: "job-files hidden" }),
     note: h("div", { class: "job-note hidden" }),
   };
-  const x = h("button", { class: "job-x", type: "button", "aria-label": "Remove", title: "Cancel / remove", text: "×",
-    onclick: () => removeJob(j) });
+  const x = h("button", { class: "job-x sl", type: "button", "aria-label": "Remove", title: "Cancel / remove",
+    onclick: () => removeJob(j) }, h("span", { class: "msr", text: "close" }));
   const thumb = h("div", { class: "job-thumb" }, j.thumb ? h("img", { src: j.thumb, alt: "", referrerpolicy: "no-referrer", loading: "lazy" }) : null);
   j.el.root.append(thumb, h("div", { class: "job-body" },
     h("div", { class: "job-top" }, j.el.title, x), j.el.tags, j.el.bar,
@@ -388,8 +417,14 @@ function renderJob(j) {
   ].filter(Boolean));
   const active = j.status === "queued" || j.status === "running";
   const p = j.progress;
-  e.bar.classList.toggle("indeterminate", active && (p == null || (j.status === "queued")));
-  e.fill.style.width = `${Math.round((j.status === "done" ? 1 : p || 0) * 100)}%`;
+  const indet = active && (p == null || j.status === "queued");
+  const shown = j.status === "done" ? 1 : (p || 0);
+  e.bar.classList.toggle("indeterminate", indet);
+  e.bar.classList.toggle("complete", j.status === "done");
+  // M3 Expressive: the wave flattens at the very start, when finished and when stopped
+  e.bar.classList.toggle("flat", !indet && (j.status !== "running" || shown < 0.02 || shown > 0.985));
+  e.bar.style.setProperty("--p", String(Math.min(1, Math.max(0, shown))));
+  if (indet) e.bar.removeAttribute("aria-valuenow"); else e.bar.setAttribute("aria-valuenow", String(Math.round(shown * 100)));
 
   let text = "";
   if (j.status === "queued") text = j.queue_position ? `Waiting in queue (#${j.queue_position})` : (j.stage || "Starting…");
@@ -410,14 +445,16 @@ function renderJob(j) {
 
   e.actions.replaceChildren();
   if (active) {
-    e.actions.append(h("button", { class: "btn btn-danger btn-small", type: "button", text: "Cancel", onclick: () => cancelJob(j) }));
+    e.actions.append(h("button", { class: "btn btn-danger btn-small sl", type: "button", onclick: () => cancelJob(j) },
+      h("span", { class: "msr", text: "cancel" }), "Cancel"));
   } else if (j.status === "done") {
     if (j.mode === "server" || j.blob) {
-      e.actions.append(h("button", { class: "btn btn-secondary btn-small", type: "button",
-        text: j.saved ? "Save again" : "Save", onclick: () => saveJob(j) }));
+      e.actions.append(h("button", { class: `btn ${j.saved ? "btn-tonal" : "btn-filled"} btn-small sl`, type: "button", onclick: () => saveJob(j) },
+        h("span", { class: "msr", text: j.saved ? "download_done" : "download" }), j.saved ? "Save again" : "Save"));
     }
   } else if (j.status === "error" || j.status === "cancelled") {
-    if (j.retry) e.actions.append(h("button", { class: "btn btn-secondary btn-small", type: "button", text: "Retry", onclick: () => { removeJob(j); j.retry(); } }));
+    if (j.retry) e.actions.append(h("button", { class: "btn btn-tonal btn-small sl", type: "button", onclick: () => { removeJob(j); j.retry(); } },
+      h("span", { class: "msr", text: "restart_alt" }), "Retry"));
   }
 
   e.note.classList.toggle("hidden", !j.note);
@@ -425,6 +462,7 @@ function renderJob(j) {
 
   const showFiles = j.status === "done" && j.mode === "server" && j.files.length > 1;
   e.files.classList.toggle("hidden", !showFiles);
+  updateEmpty();
   if (showFiles && e.files.childElementCount !== j.files.length) {
     e.files.replaceChildren(...j.files.map((f) => h("a", { href: `api/jobs/${j.id}/files/${f.index}`, download: f.name },
       h("span", { text: f.name }), h("span", { class: "mono", text: fmtBytes(f.size) }))));
@@ -438,7 +476,12 @@ function removeJob(j) {
   j.blob = null;
   jobs.delete(j.id);
   persistServerJobs();
-  $("jobs-title").classList.toggle("hidden", jobs.size === 0);
+  updateEmpty();
+}
+
+function updateEmpty() {
+  $("jobs-empty").classList.toggle("hidden", jobs.size > 0);
+  $("clear-finished").classList.toggle("hidden", ![...jobs.values()].some((j) => !["queued", "running"].includes(j.status)));
 }
 
 function cancelJob(j) {
@@ -482,7 +525,8 @@ function applyServerState(j, d) {
   });
   if (!j.title && d.title) j.title = d.title;
   if (d.status === "done" && !wasDone && !j.saved) {
-    saveJob(j);
+    if (UI.autosave) { saveJob(j); toast(`Saving “${j.title || "download"}”`); }
+    else toast(`“${j.title || "Download"}” is ready`, { label: "Save", run: () => saveJob(j) });
   }
   if (d.skipped && j.playlist && d.status === "done") j.note = `${d.skipped} item(s) couldn't be downloaded and were skipped.`;
   renderJob(j);
@@ -550,8 +594,9 @@ function startBrowserJob(req, view, info) {
       const blob = await engine.process(plan, { signal: ac.signal, onState: set });
       j.blob = blob;
       j.filename = plan.filename;
-      saveBlob(blob, plan.filename);
-      set({ status: "done", progress: 1, stage: "Done", files: [{ name: plan.filename, size: blob.size }], saved: true, speed: null, eta: null });
+      if (UI.autosave) { saveBlob(blob, plan.filename); toast(`Saved “${plan.filename}”`); }
+      else toast(`“${plan.filename}” is ready`, { label: "Save", run: () => saveJob(j) });
+      set({ status: "done", progress: 1, stage: "Done", files: [{ name: plan.filename, size: blob.size }], saved: UI.autosave, speed: null, eta: null });
       return;
     }
     const entries = info.entries.filter((e) => req.items.includes(e.index));
@@ -643,9 +688,31 @@ async function startDownload() {
 }
 
 // ── admin ───────────────────────────────────────────────────────────────
+function showSettingsPage(page, dir = "fwd") {
+  const main = $("settings-main"), admin = $("admin-page");
+  const show = page === "admin" ? admin : main, hide = page === "admin" ? main : admin;
+  if (!show.classList.contains("hidden")) return;
+  hide.classList.add("hidden");
+  show.classList.remove("hidden", "enter-fwd", "enter-back");
+  void show.offsetWidth;
+  show.classList.add(dir === "back" ? "enter-back" : "enter-fwd");
+}
+
+function openSettings(page = "main") {
+  const dlg = $("settings-modal");
+  renderAppearance();
+  renderDownloadPrefs();
+  if (!dlg.open) {
+    $("settings-main").classList.toggle("hidden", page === "admin");
+    $("admin-page").classList.toggle("hidden", page !== "admin");
+    dlg.showModal();
+  } else {
+    showSettingsPage(page);
+  }
+}
+
 async function openAdmin() {
-  const dlg = $("admin-modal");
-  if (!dlg.open) dlg.showModal();
+  openSettings("admin");
   const setup = CONFIG.auth.admin_setup;
   if (!CONFIG.auth.admin && !(setup && setup !== "done")) {
     $("admin-login").classList.remove("hidden");
@@ -657,7 +724,7 @@ async function openAdmin() {
   const panel = $("admin-panel");
   panel.classList.remove("hidden");
   if (setup === "totp" || setup === "password") { renderSetup(setup); return; }
-  if (!panel.childElementCount) panel.append(h("p", {}, h("span", { class: "spinner" }), "  Loading…"));
+  if (!panel.childElementCount) panel.append(h("p", {}, h("span", { class: "loader sm" }), "  Loading…"));
   try {
     const [st, jl] = await Promise.all([api("api/admin/status"), api("api/admin/jobs")]);
     renderAdmin(st, jl.jobs);
@@ -752,7 +819,7 @@ async function renderSetup(step) {
       }));
     return;
   }
-  panel.replaceChildren(steps, h("p", {}, h("span", { class: "spinner" }), "  Preparing…"));
+  panel.replaceChildren(steps, h("p", {}, h("span", { class: "loader sm" }), "  Preparing…"));
   let t;
   try { t = await api("api/admin/totp/begin", { method: "POST", body: {} }); }
   catch (e) { panel.replaceChildren(h("div", { class: "alert alert-error", text: e.message })); return; }
@@ -1055,7 +1122,11 @@ function bind() {
     for (const j of [...jobs.values()]) if (!["queued", "running"].includes(j.status)) removeJob(j);
   });
   $("open-sites").addEventListener("click", () => $("sites-modal").showModal());
+  $("open-settings").addEventListener("click", () => openSettings("main"));
   $("open-admin").addEventListener("click", openAdmin);
+  $("admin-back").addEventListener("click", () => showSettingsPage("main", "back"));
+  document.querySelectorAll("[data-close]").forEach((b) => b.addEventListener("click", () => b.closest("dialog").close()));
+  bindAppearance();
   $("admin-login").addEventListener("submit", async (e) => {
     e.preventDefault();
     try {
@@ -1077,19 +1148,116 @@ function bind() {
       }
     }
   });
-  for (const dlg of document.querySelectorAll("dialog.modal")) {
+  for (const dlg of document.querySelectorAll("dialog.modal, dialog.sheet")) {
     dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
   }
+}
+
+// ── settings sheet: appearance ──────────────────────────────────────────
+const AP = loadAppearance();
+const serverTheme = () => ({ seed: isHex(CONFIG?.ui?.accent) ? CONFIG.ui.accent : DEFAULT_SEED,
+  style: STYLES[CONFIG?.ui?.style] ? CONFIG.ui.style : DEFAULT_STYLE });
+
+function setAppearance(patch) {
+  Object.assign(AP, patch);
+  for (const k of Object.keys(AP)) if (AP[k] == null) delete AP[k];
+  saveAppearance(AP);
+  applyAppearance(AP, serverTheme());
+  renderAppearance();
+}
+
+function renderAppearance() {
+  const mode = AP.mode || "system";
+  document.querySelectorAll("#pref-mode [data-mode]").forEach((b) => b.setAttribute("aria-checked", b.dataset.mode === mode));
+  const contrast = AP.contrast || "standard";
+  document.querySelectorAll("#pref-contrast [data-contrast]").forEach((b) => b.setAttribute("aria-checked", b.dataset.contrast === contrast));
+  $("pref-motion").checked = !!AP.reduceMotion;
+
+  const st = serverTheme();
+  const seed = (AP.seed || st.seed).toLowerCase();
+  const style = AP.style || st.style;
+  const wrap = $("pref-swatches");
+  const custom = !PRESETS.some((p) => p.hex === seed);
+  wrap.replaceChildren(
+    ...PRESETS.map((p) => {
+      const c = swatchColor(p.hex, style);
+      return h("button", { type: "button", class: "swatch" + (p.hex === seed ? " selected" : ""), role: "radio",
+        "aria-checked": p.hex === seed, "aria-label": p.name, title: p.name,
+        style: `--sw-1:${c.primary};--sw-2:${c.secondary};--sw-3:${c.tertiary}`,
+        onclick: () => setAppearance({ seed: p.hex === st.seed ? null : p.hex }) }, h("i"), h("i"));
+    }),
+    h("label", { class: "swatch custom" + (custom ? " selected" : ""), title: "Pick any color" },
+      h("input", { type: "color", value: seed, "aria-label": "Custom color",
+        oninput: (e) => { const v = e.target.value; cancelAnimationFrame(renderAppearance._raf);
+          renderAppearance._raf = requestAnimationFrame(() => setAppearance({ seed: v })); } })),
+  );
+  $("pref-color-note").textContent = custom ? `Custom ${seed.toUpperCase()}` : "Every color in the app is generated from this one";
+  $("pref-styles").replaceChildren(...Object.entries(STYLES).map(([id, sDef]) =>
+    h("button", { type: "button", class: "chip" + (id === style ? " selected" : ""), role: "radio", "aria-checked": id === style,
+      text: sDef.label, title: sDef.note, onclick: () => setAppearance({ style: id === st.style ? null : id }) })));
+  $("pref-style-note").textContent = STYLES[style]?.note || "";
+}
+
+function bindAppearance() {
+  document.querySelectorAll("#pref-mode [data-mode]").forEach((b) => b.addEventListener("click", () =>
+    setAppearance({ mode: b.dataset.mode === "system" ? null : b.dataset.mode })));
+  document.querySelectorAll("#pref-contrast [data-contrast]").forEach((b) => b.addEventListener("click", () =>
+    setAppearance({ contrast: b.dataset.contrast === "standard" ? null : b.dataset.contrast })));
+  $("pref-motion").addEventListener("change", (e) => setAppearance({ reduceMotion: e.target.checked || null }));
+  $("pref-autosave").addEventListener("change", (e) => { UI.autosave = e.target.checked; saveUI(); });
+  document.querySelectorAll("#pref-proc [data-pproc]").forEach((b) => b.addEventListener("click", () => {
+    S.processing = b.dataset.pproc;
+    savePrefs();
+    renderProcessing();
+    renderZipRow();
+    renderDownloadPrefs();
+  }));
+  $("pref-clear-history").addEventListener("click", () => {
+    let n = 0;
+    for (const j of [...jobs.values()]) if (!["queued", "running"].includes(j.status)) { removeJob(j); n++; }
+    toast(n ? `Cleared ${n} finished download${n === 1 ? "" : "s"}` : "Nothing to clear");
+  });
+}
+
+function renderDownloadPrefs() {
+  $("pref-autosave").checked = UI.autosave;
+  const { choice } = CONFIG ? procAvailability() : { choice: false };
+  $("pref-proc-item").classList.toggle("hidden", !choice);
+  document.querySelectorAll("#pref-proc [data-pproc]").forEach((b) => b.setAttribute("aria-checked", b.dataset.pproc === S.processing));
+}
+
+// ── ripples (M3 touch feedback) ─────────────────────────────────────────
+function bindRipples() {
+  const SEL = ".btn, .icon-btn, .chip, .connected > button, .seg > button, .list-item.sl, .job-x, .pill";
+  document.addEventListener("pointerdown", (e) => {
+    const t = e.target.closest(SEL);
+    if (!t || t.disabled || document.documentElement.dataset.motion === "reduced") return;
+    const r = t.getBoundingClientRect();
+    const size = Math.hypot(r.width, r.height) * 2;
+    const dot = document.createElement("span");
+    dot.className = "ripple";
+    dot.style.cssText = `width:${size}px;height:${size}px;left:${e.clientX - r.left - size / 2}px;top:${e.clientY - r.top - size / 2}px`;
+    t.append(dot);
+    dot.addEventListener("animationend", () => dot.remove(), { once: true });
+  }, { passive: true });
 }
 
 function updateAdminDot() {
   const u = CONFIG.update, y = CONFIG.ytdlp_update;
   $("admin-dot").classList.toggle("hidden", !(u?.update_available || y?.update_available));
-  if (u?.update_available) $("open-admin").title = `Update available: ${u.latest}`;
+  const dot = !!(u?.update_available || y?.update_available);
+  $("admin-entry-dot").classList.toggle("hidden", !dot);
+  $("admin-entry-note").textContent = u?.update_available ? `Update available: ${u.latest}` : "Updates, server settings, security";
 }
 
 async function init() {
+  installShapes();
+  applyAppearance(AP, {});
+  bindRipples();
+  const bar = $("appbar");
+  addEventListener("scroll", () => bar.classList.toggle("scrolled", scrollY > 4), { passive: true });
   bind();
+  updateEmpty();
   try {
     CONFIG = await api("api/config");
   } catch (e) {
@@ -1098,8 +1266,11 @@ async function init() {
   }
   engine = new BrowserEngine(CONFIG);
   S.processing = initialProcessing();
-  $("version-badge").textContent = `v${CONFIG.version}  ·  yt-dlp ${CONFIG.ytdlp_version || "missing"}`;
-  if (CONFIG.auth.admin_enabled) $("open-admin").classList.remove("hidden");
+  $("version-badge").replaceChildren(h("span", { class: "msr", text: "bolt" }), `v${CONFIG.version} · yt-dlp ${CONFIG.ytdlp_version || "missing"}`);
+  if (CONFIG.auth.admin_enabled) $("admin-entry-group").classList.remove("hidden");
+  applyAppearance(AP, serverTheme());
+  $("about-version").textContent = CONFIG.version;
+  $("about-ytdlp").textContent = `yt-dlp ${CONFIG.ytdlp_version || "not installed"} · processing: ${CONFIG.processing.mode}`;
   updateAdminDot();
   if (CONFIG.limits.allowed_sites?.length) {
     const p = $("sites-restricted");

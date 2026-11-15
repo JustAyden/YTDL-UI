@@ -131,6 +131,12 @@ FIELDS: tuple[Field, ...] = (
           "Relayed bytes are never written to disk and never touch ffmpeg."),
     Field("browser_max_mb", "processing", int, 1024,
           "Largest download (MB) the browser is asked to process in memory."),
+    Field("ui_accent", "processing", str, "#22d3ee",
+          "Default accent color (hex, e.g. #22d3ee). The whole Material 3 color scheme is generated "
+          "from it; visitors can still pick their own in Settings."),
+    Field("ui_style", "processing", str, "tonal_spot",
+          "Default Material color style for visitors.",
+          ("tonal_spot", "vibrant", "expressive", "fidelity", "neutral", "monochrome")),
     Field("wasm_source", "processing", str, "cdn",
           "Where browsers load the ~31 MB ffmpeg.wasm core from. cdn = jsDelivr (no load on "
           "your server). local = downloaded once by the server (SHA-256 verified) and served "
@@ -345,6 +351,8 @@ ADMIN_EDITABLE: dict[str, tuple[bool, bool]] = {
     "password": (True, True),
     "allow_private_urls": (True, True),
     "allow_web_update": (True, True),
+    "ui_accent": (True, False),
+    "ui_style": (True, False),
     "ytdlp_auto_update": (True, False),
     "ytdlp_channel": (True, False),
     "ffmpeg_auto_install": (False, False),

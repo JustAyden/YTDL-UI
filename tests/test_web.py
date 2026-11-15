@@ -17,7 +17,7 @@ def wait_job(client, job_id, timeout=15):
 
 def test_index_and_headers(client):
     r = client.get("/")
-    assert r.status_code == 200 and b"Download anything." in r.data
+    assert r.status_code == 200 and b"id=\"url-form\"" in r.data
     assert b"__VERSION__" not in r.data
     for h in ("Content-Security-Policy", "X-Content-Type-Options", "Referrer-Policy", "X-Frame-Options"):
         assert h in r.headers
@@ -138,7 +138,7 @@ def test_password_gate(settings):
     assert c.post("/api/login", json={"password": "nope"}).status_code == 403
     assert c.post("/api/login", json={"password": "s3cret"}).status_code == 200
     assert c.get("/api/config").status_code == 200
-    assert b"Download anything." in c.get("/").data
+    assert b"id=\"url-form\"" in c.get("/").data
 
 
 def test_admin_disabled(settings):

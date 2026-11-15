@@ -24,7 +24,7 @@ A clean, self-hosted web UI for downloading video and audio from YouTube and 1,8
 - **Keeps itself up to date** — yt-dlp updates automatically; YTDL-UI checks GitHub for new releases ([details](#updates))
 - **Runs anywhere** — single-file apps for Windows, macOS and Linux (x64 + ARM), a Docker image, or plain Python
 - **Built for self-hosting** — admin panel with TOTP two-factor login and brute-force lockouts, bandwidth cap, optional password, rate limits, queue limits, size/duration limits, site allow-list, SSRF protection, reverse-proxy aware
-- **Light & dark theme**, works on phones, installable as an app, and accepts links shared from other apps
+- **Material 3 Expressive design** — dynamic color from any seed, light/dark/contrast options, springy motion and morphing shapes; works on phones, installable as an app, accepts links shared from other apps
 - **Zero frontend build step** — plain HTML/CSS/JS, no npm, no bundler
 
 ---
@@ -157,9 +157,15 @@ python server.py --version       # versions of YTDL-UI, yt-dlp, ffmpeg and the J
 
 ---
 
+## Appearance
+
+The interface follows **Material 3 Expressive**. Open ⚙ **Settings** to pick light/dark (or follow the system), one of nine palettes or any color you like, the color style (tonal, vibrant, expressive, faithful, neutral, monochrome), contrast, and reduced motion — every color in the app is generated from that one choice with Google's [Material Color Utilities](https://github.com/material-foundation/material-color-utilities) (2025 color spec). Admins can set the default for visitors with `ui_accent` and `ui_style`. Fonts, icons and the color library are served by YTDL-UI itself.
+
+<img alt="Settings sheet with theme, color, style and contrast options" src="docs/screenshots/settings.png" width="420">
+
 ## Admin panel & two-factor login
 
-Click ⚙ in the top bar. On a new install the initial password is printed in the server log (and saved to `data/initial-admin-password.txt`), unless you set `admin_password`. The first login walks you through:
+Open ⚙ **Settings → Admin console** (at the bottom). On a new install the initial password is printed in the server log (and saved to `data/initial-admin-password.txt`), unless you set `admin_password`. The first login walks you through:
 
 1. **Turning on two-factor authentication** — scan the QR code with an authenticator app and save the 8 recovery codes.
 2. **Choosing a new password** — the initial one stops working.

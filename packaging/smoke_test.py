@@ -52,7 +52,7 @@ def main(exe: str) -> int:
             raise AssertionError("server never became healthy")
         print("health:", health)
         with urllib.request.urlopen(base + "/", timeout=5) as r:
-            assert b"Download anything." in r.read()
+            assert b"id=\"url-form\"" in r.read()
         with urllib.request.urlopen(base + "/static/js/app.js", timeout=5) as r:
             assert r.status == 200
         with urllib.request.urlopen(base + "/api/config", timeout=5) as r:
