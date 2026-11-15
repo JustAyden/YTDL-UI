@@ -27,13 +27,14 @@ from urllib.parse import parse_qs, urljoin, urlparse
 
 from .config import Settings
 from .security import URLRejected, check_url
+from .throttle import Bandwidth
 from .ytdlp import (AUDIO_FORMATS, Request, YtDlp, YtDlpError, media_metadata, safe_filename,
                     selection_args)
 
 log = logging.getLogger("ytdlui")
 
 TOKEN_TTL = 6 * 3600
-CHUNK = 256 * 1024
+CHUNK = 64 * 1024
 # Hosts known to bind media URLs to the requesting IP and/or refuse CORS.
 NO_DIRECT_HOSTS = ("googlevideo.com", "youtube.com", "ytimg.com")
 SAFE_HEADERS = {"user-agent", "accept", "accept-language", "sec-fetch-mode", "accept-encoding"}
@@ -231,9 +232,10 @@ class RelayError(Exception):
 
 
 class Relay:
-    def __init__(self, settings: Settings, store: TokenStore):
+    def __init__(self, settings: Settings, store: TokenStore, bandwidth: Bandwidth | None = None):
         self.s = settings
         self.store = store
+        self.bandwidth = bandwidth
         self.bytes_total = 0
         self.active = 0
         self._lock = threading.Lock()
@@ -296,6 +298,8 @@ class Relay:
                     with self._lock:
                         self.bytes_total += len(chunk)
                     target.bytes_sent += len(chunk)
+                    if self.bandwidth is not None:
+                        self.bandwidth.consume(len(chunk))
                     yield chunk
             finally:
                 with self._lock:

@@ -23,7 +23,7 @@ A clean, self-hosted web UI for downloading video and audio from YouTube and 1,8
 - **Process on the server *or* in the visitor's browser** — admins can move the heavy lifting onto users' devices ([how it works](#server-vs-browser-processing))
 - **Keeps itself up to date** — yt-dlp updates automatically; YTDL-UI checks GitHub for new releases ([details](#updates))
 - **Runs anywhere** — single-file apps for Windows, macOS and Linux (x64 + ARM), a Docker image, or plain Python
-- **Built for self-hosting** — optional password, admin panel, rate limits, queue limits, size/duration limits, site allow-list, SSRF protection, reverse-proxy aware
+- **Built for self-hosting** — bandwidth cap, optional password, admin panel, rate limits, queue limits, size/duration limits, site allow-list, SSRF protection, reverse-proxy aware
 - **Light & dark theme**, works on phones, installable as an app, and accepts links shared from other apps
 - **Zero frontend build step** — plain HTML/CSS/JS, no npm, no bundler
 
@@ -142,6 +142,7 @@ The ones you're most likely to want:
 | `trust_proxy` | `0` | Set to `1` behind Caddy/Nginx/cloudflared (or `cloudflare`) so rate limits see real client IPs. |
 | `processing_mode` | `choice` | `server`, `browser` or `choice` — see above. |
 | `max_concurrent_jobs` | `2` | Server downloads that run at once; the rest queue. |
+| `bandwidth_limit` | `10` | MB/s cap on the media traffic the server handles (served files, ZIPs, relayed streams, and yt-dlp downloads split across job slots). `0` = unlimited. |
 | `max_duration_minutes` / `max_filesize_mb` | `0` (off) | Refuse very long or very large downloads. |
 | `allowed_sites` | *(any)* | e.g. `youtube.com, youtu.be, soundcloud.com` |
 | `cookies_file` | *(none)* | A `cookies.txt` for age-restricted videos and YouTube's "confirm you're not a bot". |
@@ -160,6 +161,7 @@ python server.py --version       # versions of YTDL-UI, yt-dlp, ffmpeg and the J
 - Keep the default `host = 127.0.0.1` and put a reverse proxy or tunnel in front (Caddy, Nginx, [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)), then set `trust_proxy = 1`.
 - Downloads run as background jobs, so long playlists work fine behind proxies with short timeouts (Cloudflare's is 100 s).
 - Set `password` for a private instance, `admin_password` to manage it, and consider `processing_mode = browser` to keep CPU and disk usage near zero.
+- `bandwidth_limit` (10 MB/s by default) keeps downloads from saturating the server's connection — raise it on a fast link, lower it on a home connection you share.
 - `sudo sh install.sh` sets up a hardened systemd service (dedicated user, read-only system, restricted syscalls). See **[SETUP.md](SETUP.md)** for a full Debian + Caddy walkthrough, Cloudflare Tunnel and Docker examples.
 
 ---

@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.1.0] — 2026-11-15
+
+### New
+- **Server bandwidth cap** (`bandwidth_limit`, default **10 MB/s**, `0` = unlimited) so heavy use can't
+  starve the server's network connection. Finished files, playlist ZIPs, relayed browser-mode streams
+  and the self-hosted ffmpeg.wasm core share one server-wide limit; server-side yt-dlp downloads are
+  capped at the same total, split evenly across `max_concurrent_jobs` (5 MB/s each with the defaults).
+  Set it in `config.ini`, with `YTDLUI_BANDWIDTH_LIMIT`, or `--set bandwidth_limit=25`; decimals work.
+- Admin panel shows the cap and how fast the server is sending right now.
+
 ## [2.0.0] — 2026-11-15
 
 A ground-up refresh: background downloads with real progress, optional in-browser processing,

@@ -733,10 +733,13 @@ function renderAdmin(st, jobList) {
         stat(st.jobs.running, "running"), stat(st.jobs.queued, "queued"), stat(st.jobs.completed_total, "completed"),
         stat(fmtBytes(st.tmp_bytes) || "0 B", "temp files"), stat(st.disk ? fmtBytes(st.disk.free) : "?", "disk free"),
         stat(fmtBytes(st.relay.bytes_total) || "0 B", "relayed"), stat(st.relay.active, "active relays"),
+        stat(st.bandwidth.limit_mb ? `${st.bandwidth.limit_mb} MB/s` : "unlimited", "bandwidth cap"),
+        stat(`${fmtBytes(st.bandwidth.current) || "0 B"}/s`, "sending now"),
         stat(fmtEta(st.uptime), "uptime")),
       h("p", { style: "margin:10px 0 0;font-size:0.78rem" },
         `Processing: ${st.processing.mode}` + (st.processing.mode === "choice" ? ` (default ${st.processing.default})` : "") +
-        ` · relay ${st.processing.relay ? "on" : "off"} · fallback ${st.processing.fallback ? "on" : "off"} · ffmpeg.wasm from ${st.processing.wasm}`),
+        ` · relay ${st.processing.relay ? "on" : "off"} · fallback ${st.processing.fallback ? "on" : "off"} · ffmpeg.wasm from ${st.processing.wasm}` +
+        (st.bandwidth.limit_mb ? ` · each server download ≤ ${+st.bandwidth.per_download_mb.toFixed(2)} MB/s` : "")),
       h("p", { style: "margin:4px 0 0;font-size:0.75rem", class: "mono", text: `config: ${st.config_path || "(defaults)"} · data: ${st.data_path}` }),
     ),
     h("div", { class: "modal-section" },

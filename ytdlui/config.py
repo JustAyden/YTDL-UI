@@ -95,6 +95,11 @@ FIELDS: tuple[Field, ...] = (
           "Kill a server download that runs longer than this."),
     Field("min_free_space_mb", "limits", int, 1024,
           "Refuse new server downloads when free disk space drops below this."),
+    Field("bandwidth_limit", "limits", float, 10.0,
+          "Cap, in MB/s, on the media traffic this server handles for users, so downloads can't "
+          "starve its network connection. Finished files, playlist ZIPs and relayed browser-mode "
+          "streams share it; server-side yt-dlp downloads are capped at the same total (split "
+          "evenly across max_concurrent_jobs). Decimals are fine (e.g. 2.5). 0 = unlimited."),
 
     # ── processing ────────────────────────────────────────────────────────
     Field("processing_mode", "processing", str, "choice",
@@ -182,6 +187,14 @@ def _coerce(field: Field, raw: Any) -> Any:
             return int(str(raw).strip())
         except ValueError:
             raise ConfigError(f"{field.name}: expected a whole number, got {raw!r}") from None
+    if field.type is float:
+        try:
+            value = float(str(raw).strip())
+        except ValueError:
+            raise ConfigError(f"{field.name}: expected a number, got {raw!r}") from None
+        if value < 0 or value != value or value == float("inf"):
+            raise ConfigError(f"{field.name}: must be 0 or a positive number, got {raw!r}")
+        return value
     if field.type is list:
         if isinstance(raw, (list, tuple)):
             return [str(x).strip() for x in raw if str(x).strip()]
@@ -293,6 +306,8 @@ def render_example() -> str:
         if f.choices:
             out.append(f"# One of: {', '.join(f.choices)}")
         default = f.default
+        if isinstance(default, float) and default.is_integer():
+            default = int(default)
         if isinstance(default, bool):
             default = "true" if default else "false"
         elif isinstance(default, list):

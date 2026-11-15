@@ -20,6 +20,7 @@ from .config import APP_DIR, Settings
 from .jobs import JobManager, JobRejected
 from .relay import FallbackNeeded, Relay, RelayError, TokenStore, resolve
 from .security import RateLimiter, URLRejected, check_url, safe_equals
+from .throttle import MB, Bandwidth, ytdlp_rate
 from .updater import (AppUpdater, YtdlpUpdater, cleanup_old_binaries, download, ffmpeg_asset,
                       install_ffmpeg, restart_process)
 from .ytdlp import (AUDIO_BITRATES, AUDIO_FORMATS, DEFAULT_BITRATE, MIME_TYPES, VIDEO_FORMATS,
@@ -53,7 +54,8 @@ class Services:
         self.ytdlp = YtDlp(settings)
         self.jobs = JobManager(settings, self.ytdlp)
         self.tokens = TokenStore()
-        self.relay = Relay(settings, self.tokens)
+        self.bandwidth = Bandwidth(settings.bandwidth_limit)
+        self.relay = Relay(settings, self.tokens, self.bandwidth)
         self.limiter = RateLimiter()
         self.ytdlp_updater = YtdlpUpdater(settings, self.ytdlp, self.jobs.idle)
         self.app_updater = AppUpdater(settings)
@@ -194,6 +196,13 @@ def create_app(settings: Settings, start_background: bool = True) -> Flask:
         login_html = fh.read().replace("__VERSION__", __version__)
 
     # ── helpers ─────────────────────────────────────────────────────────
+    def throttled(resp: Response) -> Response:
+        """Pace a file response through the server-wide bandwidth cap."""
+        if svc.bandwidth.enabled and resp.status_code in (200, 206) and request.method != "HEAD":
+            resp.response = svc.bandwidth.wrap(resp.response)
+            resp.direct_passthrough = True
+        return resp
+
     def client_ip() -> str:
         if tp == "cloudflare":
             return request.headers.get("CF-Connecting-IP") or request.remote_addr or "?"
@@ -273,7 +282,7 @@ def create_app(settings: Settings, start_background: bool = True) -> Flask:
         if name not in FFMPEG_CORE_FILES or svc.wasm_state != "ready":
             abort(404)
         mime = "application/wasm" if name.endswith(".wasm") else "text/javascript"
-        return send_from_directory(settings.vendor_path, name, mimetype=mime, max_age=30 * 24 * 3600)
+        return throttled(send_from_directory(settings.vendor_path, name, mimetype=mime, max_age=30 * 24 * 3600))
 
     # ── auth ────────────────────────────────────────────────────────────
     @app.post("/api/login")
@@ -412,11 +421,12 @@ def create_app(settings: Settings, start_background: bool = True) -> Flask:
                 return _err("No such file.", 404)
             f = job.files[index]
             ext = f["name"].rsplit(".", 1)[-1].lower()
-            return send_file(f["path"], mimetype=MIME_TYPES.get(ext, "application/octet-stream"),
-                             as_attachment=True, download_name=f["name"], conditional=True, max_age=0)
+            return throttled(send_file(f["path"], mimetype=MIME_TYPES.get(ext, "application/octet-stream"),
+                                       as_attachment=True, download_name=f["name"], conditional=True, max_age=0))
         name = safe_filename(job.title or "playlist", "zip")
         files = [(f["path"], f["name"]) for f in job.files]
-        return Response(stream_zip(files), mimetype="application/zip",
+        body_iter = svc.bandwidth.wrap(stream_zip(files)) if svc.bandwidth.enabled else stream_zip(files)
+        return Response(body_iter, mimetype="application/zip",
                         headers={"Content-Disposition": _attachment(name), "Cache-Control": "no-store"},
                         direct_passthrough=True)
 
@@ -529,6 +539,12 @@ def create_app(settings: Settings, start_background: bool = True) -> Flask:
             "tmp_bytes": svc.jobs.tmp_usage(),
             "disk": disk_info,
             "relay": {"bytes_total": svc.relay.bytes_total, "active": svc.relay.active, "tokens": len(svc.tokens)},
+            "bandwidth": {
+                "limit_mb": settings.bandwidth_limit,
+                "current": svc.bandwidth.current_rate(),
+                "served_total": svc.bandwidth.bytes_total,
+                "per_download_mb": (ytdlp_rate(settings.bandwidth_limit, settings.max_concurrent_jobs) or 0) / MB,
+            },
             "processing": {"mode": settings.processing_mode, "default": settings.processing_default,
                            "fallback": settings.fallback_to_server, "relay": settings.relay,
                            "wasm": svc.ffmpeg_core_urls()["source"]},

@@ -23,6 +23,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .config import Settings
+from .throttle import ytdlp_rate
 from .ytdlp import (IS_WINDOWS, Request, YtDlp, classify_error, error_lines, parse_ytdlp_version,
                     processing_args, selection_args)
 
@@ -353,6 +354,9 @@ class JobManager:
             args += ["--progress-delta", "0.5"]
         if self.s.max_filesize_mb > 0:
             args += ["--max-filesize", f"{self.s.max_filesize_mb}M"]
+        rate = ytdlp_rate(self.s.bandwidth_limit, self.s.max_concurrent_jobs)
+        if rate:
+            args += ["--limit-rate", str(rate)]
         if req.playlist:
             args += ["--yes-playlist", "--ignore-errors"]
             if req.items:

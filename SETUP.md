@@ -221,6 +221,7 @@ max_duration_minutes = 180
 max_filesize_mb = 4096
 max_playlist_items = 50
 job_ttl_minutes = 20
+bandwidth_limit = 10                # MB/s for all user traffic; 0 = unlimited
 
 [processing]
 processing_mode = choice
