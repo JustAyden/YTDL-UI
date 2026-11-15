@@ -191,6 +191,9 @@ async function fetchFrom(src, stream, signal, onBytes) {
 }
 
 async function fetchStream(stream, signal, onBytes) {
+  // YouTube stream URLs only work a few seconds after they were issued (yt-dlp's available_at).
+  const waitMs = (stream.available_in || 0) * 1000 - (performance.now() - (stream.resolvedAt || 0)) + 500;
+  if (stream.available_in > 0 && waitMs > 0) await sleep(Math.min(waitMs, 15000), signal);
   const sources = [];
   if (stream.direct) sources.push({ url: stream.direct, direct: true });
   if (stream.token) sources.push({ url: `api/relay/${encodeURIComponent(stream.token)}`, direct: false });
@@ -206,8 +209,9 @@ async function fetchStream(stream, signal, onBytes) {
       if (!src.direct) break;   // relay failed: nothing left to try
     }
   }
-  if (lastErr instanceof HTTPError && lastErr.status === 410) {
-    throw new Error("The source refused the download (the link may have expired). Try again.");
+  if (lastErr instanceof HTTPError && [403, 410].includes(lastErr.status)) {
+    // The site refused the relayed stream; the server can usually still fetch it with yt-dlp.
+    throw new FallbackError(`The site refused to send this stream to the relay (${lastErr.message}).`);
   }
   throw new FallbackError(`Couldn't fetch the media in the browser: ${lastErr?.message || "unknown error"}`);
 }
@@ -295,6 +299,9 @@ export class BrowserEngine {
       if (data.fallback) throw new FallbackError(data.error);
       throw new Error(data.error || `Server error ${res.status}`);
     }
+    const at = performance.now();
+    for (const st of data.streams || []) st.resolvedAt = at;
+    if (data.cover) data.cover.resolvedAt = at;
     return data;
   }
 
@@ -330,7 +337,9 @@ export class BrowserEngine {
     };
 
     const label = plan.streams.length > 1 ? "Downloading video + audio" : "Downloading";
-    report(label);
+    const firstWait = Math.max(0, ...plan.streams.map((st) => st.available_in || 0));
+    if (firstWait > 0.5) onState({ stage: `Waiting ${Math.ceil(firstWait)} s for the site to release the stream`, progress: null, speed: null, eta: null });
+    else report(label);
     // Fetch streams in parallel; if one fails, stop the others too.
     const inner = new AbortController();
     const relayAbort = () => inner.abort();

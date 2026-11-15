@@ -135,3 +135,58 @@ def test_site_password_lockout(settings):
     assert c.post("/api/login", json={"password": "x"}).status_code == 403
     assert c.post("/api/login", json={"password": "y"}).status_code == 429
     assert c.post("/api/login", json={"password": "site-pass"}).status_code == 429
+
+
+def _admin_client(settings):
+    settings.admin_password = "initial-pass"
+    app = make_app(settings)
+    c = app.test_client()
+    c.post("/api/admin/login", json={"password": "initial-pass"})
+    c.post("/api/admin/totp/begin", json={})
+    c.post("/api/admin/totp/confirm", json={"code": _code(app)})
+    c.post("/api/admin/password", json={"current": "initial-pass", "new": "a-much-better-pass", "code": _code(app)})
+    return app, c
+
+
+def test_admin_settings_editor(settings):
+    app, c = _admin_client(settings)
+    views = {v["name"]: v for v in c.get("/api/admin/settings").get_json()["settings"]}
+    assert views["processing_mode"]["value"] == "choice" and "extra_args" not in views
+    assert views["password"]["value"] == ""                                   # never sent to the browser
+    r = c.post("/api/admin/settings", json={"changes": {"processing_mode": "browser", "bandwidth_limit": "2.5",
+                                                         "max_concurrent_jobs": 4}})
+    assert r.status_code == 200 and r.get_json()["restart"] == ["max_concurrent_jobs"]
+    assert c.get("/api/config").get_json()["processing"]["mode"] == "browser"   # live
+    svc = app.extensions["ytdlui"]
+    assert svc.bandwidth.rate == 2.5 * 1000 * 1000                               # live
+    saved = json.loads(open(settings.data_path + "/settings.json").read())
+    assert saved["processing_mode"] == "browser"
+    # persists across restarts (admin panel layer)
+    from ytdlui.config import load_settings
+    again = load_settings(None, {"data_dir": settings.data_dir}, environ={})
+    assert again.processing_mode == "browser" and again.sources["processing_mode"] == "admin"
+    # validation + blocked keys
+    assert c.post("/api/admin/settings", json={"changes": {"processing_mode": "gpu"}}).status_code == 400
+    assert c.post("/api/admin/settings", json={"changes": {"extra_args": "--exec rm"}}).status_code == 400
+    # security settings need a 2FA code
+    assert c.post("/api/admin/settings", json={"changes": {"password": "visitor-pass"}}).status_code == 403
+    ok = c.post("/api/admin/settings", json={"changes": {"password": "visitor-pass"}, "code": _code(app)})
+    assert ok.status_code == 200 and settings.password == "visitor-pass"
+    # reset returns to config/default
+    r = c.post("/api/admin/settings", json={"changes": {"processing_mode": None}})
+    assert r.status_code == 200, r.get_json()
+    assert settings.processing_mode == "choice"
+
+
+def test_env_locked_settings(settings, monkeypatch):
+    settings.sources["relay"] = "env"
+    app, c = _admin_client(settings)
+    views = {v["name"]: v for v in c.get("/api/admin/settings").get_json()["settings"]}
+    assert views["relay"]["locked"]
+    r = c.post("/api/admin/settings", json={"changes": {"relay": False}})
+    assert r.status_code == 400 and "environment" in r.get_json()["error"]
+
+
+def test_settings_require_admin(client):
+    assert client.get("/api/admin/settings").status_code == 401
+    assert client.post("/api/admin/settings", json={"changes": {"relay": False}}).status_code == 401

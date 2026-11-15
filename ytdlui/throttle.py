@@ -28,6 +28,12 @@ class Bandwidth:
         self.bytes_total = 0
         self._window: list[tuple[float, int]] = []          # (timestamp, bytes) for the live rate
 
+    def set_limit(self, limit_mb: float) -> None:
+        with self._lock:
+            self.rate = max(0.0, float(limit_mb)) * MB
+            self.capacity = max(self.rate * 0.5, 256 * 1024)
+            self._tokens = min(self._tokens, self.capacity)
+
     @property
     def enabled(self) -> bool:
         return self.rate > 0

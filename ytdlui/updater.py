@@ -513,9 +513,16 @@ class AppUpdater:
 
     def _pip_requirements(self) -> None:
         req = os.path.join(APP_DIR, "requirements.txt")
-        if os.path.isfile(req) and pip_can_write():
-            subprocess.run([sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
-                            "--no-input", "-r", req], capture_output=True, timeout=600)
+        if not os.path.isfile(req):
+            return
+        if not pip_can_write():
+            log.warning("Can't install updated Python dependencies automatically here; run: "
+                        "%s -m pip install -r %s", sys.executable, req)
+            return
+        r = subprocess.run([sys.executable, "-m", "pip", "install", "--disable-pip-version-check",
+                            "--no-input", "-r", req], capture_output=True, text=True, timeout=600)
+        if r.returncode != 0:
+            log.warning("Updating Python dependencies failed: %s", (r.stderr or r.stdout).strip()[-400:])
 
 
 def _replace(src: str, dst: str) -> None:

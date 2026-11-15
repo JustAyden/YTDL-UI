@@ -130,7 +130,7 @@ Git checkouts update with `git pull --ff-only`; extracted archives are updated i
 
 ## Configuration
 
-Copy [`config.example.ini`](config.example.ini) to `config.ini` — every setting is documented there. Any setting also works as an environment variable (`YTDLUI_PORT=8080`) or on the command line (`--set port=8080`). Precedence: command line › environment › `config.ini` › defaults.
+Most settings can be changed live in the **admin panel → Settings** (saved to `data/settings.json`). For everything else, copy [`config.example.ini`](config.example.ini) to `config.ini` — every setting is documented there. Any setting also works as an environment variable (`YTDLUI_PORT=8080`) or on the command line (`--set port=8080`). Precedence: command line › environment › admin panel › `config.ini` › defaults.
 
 The ones you're most likely to want:
 

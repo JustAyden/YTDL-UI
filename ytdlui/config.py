@@ -217,10 +217,14 @@ def _coerce(field: Field, raw: Any) -> Any:
 class Settings:
     """Plain attribute bag of resolved settings plus a few derived paths."""
 
-    def __init__(self, values: dict[str, Any], config_path: str | None = None):
+    def __init__(self, values: dict[str, Any], config_path: str | None = None,
+                 sources: dict[str, str] | None = None):
         for f in FIELDS:
             setattr(self, f.name, values.get(f.name, f.default))
         self.config_path = config_path
+        # where each value came from: default | config | admin | env | cli
+        self.sources = {f.name: (sources or {}).get(f.name, "config" if f.name in values else "default")
+                        for f in FIELDS}
         self.app_dir = APP_DIR
         if os.path.isabs(self.data_dir):
             data = self.data_dir
@@ -277,19 +281,103 @@ def load_settings(config_path: str | None = None, overrides: dict[str, Any] | No
     elif config_path:
         raise ConfigError(f"Config file not found: {config_path}")
 
+    sources = {k: "config" for k in values}
+    env_values: dict[str, Any] = {}
     for f in FIELDS:
         env_key = f"YTDLUI_{f.name.upper()}"
         if env_key in environ:
-            values[f.name] = _coerce(f, environ[env_key])
+            env_values[f.name] = _coerce(f, environ[env_key])
 
+    cli_values: dict[str, Any] = {}
     for key, raw in (overrides or {}).items():
         field = FIELD_MAP.get(key)
         if field is None:
             raise ConfigError(f"Unknown setting '{key}'")
         if raw is not None:
-            values[key] = _coerce(field, raw)
+            cli_values[key] = _coerce(field, raw)
 
-    return Settings(values, used_path)
+    base_values = dict(values)          # config.ini + defaults, for "reset" in the admin panel
+    # Settings changed in the admin panel (data/settings.json) sit between config.ini and env/CLI.
+    probe = Settings({**values, **env_values, **cli_values}, used_path)
+    for key, raw in read_admin_overrides(probe.data_path).items():
+        field = FIELD_MAP.get(key)
+        if field is None or key not in ADMIN_EDITABLE:
+            continue
+        try:
+            values[key] = _coerce(field, raw)
+            sources[key] = "admin"
+        except ConfigError:
+            pass
+    for key, val in env_values.items():
+        values[key], sources[key] = val, "env"
+    for key, val in cli_values.items():
+        values[key], sources[key] = val, "cli"
+    settings = Settings(values, used_path, sources)
+    settings.base_values = base_values
+    return settings
+
+
+# ── settings editable in the admin panel ─────────────────────────────────────
+# name → (applies without a restart, needs a 2FA code to change)
+# Deliberately NOT editable from the browser: yt-dlp extra args, binary/cookie paths, proxy,
+# host/port/threads/data_dir — those could run commands on the server or lock you out.
+ADMIN_EDITABLE: dict[str, tuple[bool, bool]] = {
+    "processing_mode": (True, False),
+    "processing_default": (True, False),
+    "fallback_to_server": (True, False),
+    "relay": (True, False),
+    "browser_max_mb": (True, False),
+    "bandwidth_limit": (True, False),
+    "max_concurrent_jobs": (False, False),
+    "max_jobs_per_client": (True, False),
+    "max_queue": (True, False),
+    "max_duration_minutes": (True, False),
+    "max_filesize_mb": (True, False),
+    "max_playlist_items": (True, False),
+    "job_ttl_minutes": (True, False),
+    "job_timeout_minutes": (True, False),
+    "min_free_space_mb": (True, False),
+    "rate_limit": (True, False),
+    "download_rate_limit": (True, False),
+    "allowed_sites": (True, False),
+    "login_max_attempts": (True, False),
+    "login_lockout_minutes": (True, False),
+    "password": (True, True),
+    "allow_private_urls": (True, True),
+    "allow_web_update": (True, True),
+    "ytdlp_auto_update": (True, False),
+    "ytdlp_channel": (True, False),
+    "ffmpeg_auto_install": (False, False),
+    "update_check": (False, False),
+}
+
+
+def admin_overrides_path(data_path: str) -> str:
+    return os.path.join(data_path, "settings.json")
+
+
+def read_admin_overrides(data_path: str) -> dict[str, Any]:
+    import json
+    try:
+        with open(admin_overrides_path(data_path), encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def write_admin_overrides(data_path: str, data: dict[str, Any]) -> None:
+    import json
+    path = admin_overrides_path(data_path)
+    tmp = path + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0), 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=1, sort_keys=True)
+    os.replace(tmp, path)
+
+
+def coerce_setting(name: str, raw: Any) -> Any:
+    return _coerce(FIELD_MAP[name], raw)
 
 
 def render_example() -> str:
@@ -301,7 +389,7 @@ def render_example() -> str:
         "# Copy to config.ini and uncomment what you want to change.",
         "# Any setting can also be set with an environment variable: YTDLUI_<NAME>",
         "# (e.g. YTDLUI_PROCESSING_MODE=browser) or on the command line with",
-        "# --set name=value. Precedence: CLI > environment > config.ini > defaults.",
+        "# --set name=value. Precedence: CLI > environment > admin panel > config.ini > defaults.\n# (Changes made in the admin panel's Settings are saved in data/settings.json.)",
         "",
     ]
     section = None

@@ -417,3 +417,12 @@ dialog.modal[open] { animation: fadeUp 0.18s ease both; }
   .kv { grid-template-columns: 1fr auto; }
   .kv .k { grid-column: 1 / -1; margin-bottom: -6px; }
 }
+
+/* admin settings editor */
+.set-input {
+  background: var(--bg-alt); border: 1px solid var(--border); border-radius: 6px; color: var(--text);
+  padding: 6px 9px; font-size: 0.82rem; width: 100%; min-width: 120px; max-width: 240px; font-family: inherit;
+}
+.set-input:focus { outline: none; border-color: var(--cyan-dim); box-shadow: 0 0 0 3px var(--tint-cyan); }
+.set-input:disabled { opacity: 0.5; cursor: not-allowed; }
+input[type="number"].set-input { max-width: 110px; }

@@ -698,8 +698,9 @@ function adminAction(label, path, { confirmText, body, cls = "btn-secondary", af
 
 // ── admin security: 2FA setup, password change ─────────────────────────
 const field = (attrs) => h("div", { class: "field" }, h("input", { required: true, ...attrs }));
-const codeInput = (id = "sec-code") => field({ id, type: "text", inputmode: "numeric", autocomplete: "one-time-code",
-  placeholder: "6-digit code from your authenticator", maxlength: "20", "aria-label": "Authenticator code" });
+const codeInput = (id = "sec-code", required = true) => field({ id, type: "text", inputmode: "numeric",
+  autocomplete: "one-time-code", placeholder: "6-digit code from your authenticator", maxlength: "20",
+  "aria-label": "Authenticator code", required: required || null });
 
 async function refreshConfig() { CONFIG = await api("api/config"); updateAdminDot(); }
 
@@ -807,6 +808,130 @@ function securitySection(sec) {
     h("div", { class: "modal-section-title", style: "margin-top:6px", text: "Locked-out IPs" }), lock);
 }
 
+// ── admin: server settings editor ──────────────────────────────────────
+const SETTING_LABELS = {
+  processing_mode: "Where downloads are processed", processing_default: "Default for visitors (choice mode)",
+  fallback_to_server: "Fall back to the server", relay: "Relay streams for blocked sites",
+  browser_max_mb: "Largest in-browser download (MB)", bandwidth_limit: "Bandwidth cap (MB/s, 0 = off)",
+  max_concurrent_jobs: "Simultaneous server downloads", max_jobs_per_client: "Downloads per visitor",
+  max_queue: "Queue length", max_duration_minutes: "Max video length (min, 0 = off)",
+  max_filesize_mb: "Max file size (MB, 0 = off)", max_playlist_items: "Max playlist items",
+  job_ttl_minutes: "Keep finished files (min)", job_timeout_minutes: "Download timeout (min)",
+  min_free_space_mb: "Keep free disk space (MB)", rate_limit: "Lookups per minute per IP",
+  download_rate_limit: "Downloads per minute per IP", allowed_sites: "Allowed sites (comma-separated, empty = all)",
+  login_max_attempts: "Failed logins before lockout", login_lockout_minutes: "Lockout length (min)",
+  password: "Site password (visitors)", allow_private_urls: "Allow private/LAN URLs",
+  allow_web_update: "Allow updates from this panel", ytdlp_auto_update: "Auto-update yt-dlp",
+  ytdlp_channel: "yt-dlp channel", ffmpeg_auto_install: "Auto-install ffmpeg", update_check: "Check for YTDL-UI updates",
+};
+const SECTION_TITLES = { processing: "Processing", limits: "Limits", security: "Access & security", updates: "Updates" };
+const CHOICE_LABELS = {
+  server: "Server", browser: "Visitor's device", choice: "Let visitors choose", auto: "Auto (device if capable)",
+  stable: "Stable", nightly: "Nightly",
+};
+
+function settingInput(st) {
+  const common = { "data-setting": st.name, disabled: st.locked || null, "aria-label": SETTING_LABELS[st.name] || st.name };
+  if (st.choices) {
+    const choices = st.name === "processing_default" ? st.choices : st.choices;
+    return h("select", { ...common, class: "set-input" }, choices.map((c) =>
+      h("option", { value: c, selected: c === st.value || null, text: CHOICE_LABELS[c] || c })));
+  }
+  if (st.type === "bool") {
+    const cb = h("input", { ...common, type: "checkbox" });
+    cb.checked = !!st.value;
+    return h("label", { class: "switch" }, cb, h("span"));
+  }
+  if (st.type === "int" || st.type === "float") {
+    return h("input", { ...common, class: "set-input", type: "number", min: "0", step: st.type === "float" ? "0.5" : "1", value: String(st.value) });
+  }
+  if (st.name === "password") {
+    return h("input", { ...common, class: "set-input", type: "password", autocomplete: "new-password",
+      placeholder: st.is_set ? "•••••• (set — type to change)" : "not set — anyone can use the site" });
+  }
+  return h("input", { ...common, class: "set-input", type: "text", value: Array.isArray(st.value) ? st.value.join(", ") : String(st.value ?? "") });
+}
+
+function readSetting(el, st) {
+  if (el.type === "checkbox") return el.checked;
+  if (el.type === "number") return el.value === "" ? st.value : Number(el.value);
+  return el.value;
+}
+
+function sameValue(a, b) {
+  if (Array.isArray(b)) return String(a).split(",").map((x) => x.trim()).filter(Boolean).join(",") === b.join(",");
+  return String(a) === String(b);
+}
+
+function settingsSection() {
+  const wrap = h("div", { class: "modal-section" }, h("div", { class: "modal-section-title", text: "Settings" }),
+    h("p", { style: "font-size:0.8rem", text: "Loading…" }));
+  api("api/admin/settings").then(({ settings }) => renderSettings(wrap, settings))
+    .catch((e) => wrap.replaceChildren(h("div", { class: "alert alert-error", text: e.message })));
+  return wrap;
+}
+
+function renderSettings(wrap, list) {
+  const msg = h("div");
+  const byName = Object.fromEntries(list.map((s) => [s.name, s]));
+  const groups = {};
+  for (const st of list) (groups[st.section] ||= []).push(st);
+  const codeRow = h("div", { class: "hidden" }, codeInput("set-code", false),
+    h("p", { style: "font-size:0.75rem;margin:-2px 0 8px", text: "Changing a security setting needs a current 2FA code." }));
+  const form = h("form", { autocomplete: "off" },
+    ...Object.entries(groups).map(([sec, items]) => h("details", { open: sec === "processing" || null, style: "margin-bottom:8px" },
+      h("summary", { style: "cursor:pointer;font-size:0.85rem;margin-bottom:6px", text: SECTION_TITLES[sec] || sec }),
+      ...items.map((st) => h("div", { class: "opt-row", style: "padding:9px 0" },
+        h("div", { class: "opt-text", style: "min-width:0" },
+          h("span", { text: SETTING_LABELS[st.name] || st.name, title: st.help }),
+          h("small", { text: st.help.length > 150 ? st.help.slice(0, 147) + "…" : st.help, title: st.help }),
+          h("small", { style: "color:var(--text-muted)", text: [st.locked ? "🔒 set on the server (env/CLI) — can't change here" : null,
+            st.source === "admin" ? "changed in this panel" : st.source === "config" ? "from config.ini" : null,
+            st.restart ? "restart to apply" : null, st.sensitive ? "needs 2FA code" : null].filter(Boolean).join(" · ") })),
+        h("div", { style: "flex-shrink:0;max-width:52%" }, settingInput(st)))))),
+    codeRow,
+    h("div", { class: "btn-row" },
+      h("button", { class: "btn btn-small btn-primary", type: "submit", text: "Save settings" }),
+      h("button", { class: "btn btn-small btn-secondary", type: "button", text: "Reset changed-in-panel to config", onclick: async () => {
+        const names = list.filter((s) => s.source === "admin" && !s.locked).map((s) => s.name);
+        if (!names.length) { alertBox(msg, "info", "Nothing was changed in this panel."); return; }
+        if (!confirm(`Reset ${names.length} setting(s) to config.ini / defaults?`)) return;
+        await save(Object.fromEntries(names.map((n) => [n, null])));
+      } })),
+    msg);
+  const changed = () => {
+    const out = {};
+    for (const el of form.querySelectorAll("[data-setting]")) {
+      const st = byName[el.dataset.setting];
+      if (st.locked) continue;
+      const v = readSetting(el, st);
+      if (st.name === "password") { if (v !== "") out[st.name] = v; continue; }
+      if (!sameValue(v, st.value)) out[st.name] = v;
+    }
+    return out;
+  };
+  form.addEventListener("input", () => {
+    codeRow.classList.toggle("hidden", !Object.keys(changed()).some((n) => byName[n].sensitive));
+  });
+  async function save(changes) {
+    try {
+      const r = await api("api/admin/settings", { method: "POST", body: { changes, code: form.querySelector("#set-code")?.value || "" } });
+      await refreshConfig();
+      renderSettings(wrap, r.settings);
+      alertBox(wrap.lastElementChild.lastElementChild, r.restart?.length ? "warn" : "success", r.message);
+      renderProcessing();
+      renderZipRow();
+    } catch (err) { alertBox(msg, "error", err.message); }
+  }
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const c = changed();
+    if (!Object.keys(c).length) { alertBox(msg, "info", "No changes."); return; }
+    save(c);
+  });
+  wrap.replaceChildren(h("div", { class: "modal-section-title", text: "Settings" }), form);
+}
+
 function renderAdmin(st, jobList) {
   const panel = $("admin-panel");
   const app = st.app, yt = st.ytdlp;
@@ -864,6 +989,7 @@ function renderAdmin(st, jobList) {
         jj.status === "running" || jj.status === "queued" ? adminAction("×", `api/admin/jobs/${jj.id}/cancel`) : null,
       ))) : h("p", { text: "None right now." }),
     ),
+    settingsSection(),
     securitySection(st.security),
     h("div", { class: "btn-row" },
       adminAction("Clear finished downloads", "api/admin/cleanup"),

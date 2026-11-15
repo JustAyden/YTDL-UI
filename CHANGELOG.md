@@ -1,5 +1,27 @@
 # Changelog
 
+## [2.3.0] — 2026-11-15
+
+### New
+- **Settings in the admin panel.** Change where downloads run (server / visitor's device / let visitors
+  choose), the visitors' default, fallback, relay, bandwidth cap, download limits, rate limits, lockout
+  rules, the site password and update options without editing files. Most changes apply instantly;
+  the few that need a restart say so. Changes are saved to `data/settings.json` (precedence:
+  command line › environment › admin panel › `config.ini`). Settings fixed by an environment variable or
+  command-line flag are shown as locked. Security settings (site password, private URLs, web updates)
+  need a 2FA code. Things that could run commands on the server (yt-dlp extra args, binary/cookie
+  paths, proxy, host/port) stay config-file only.
+
+### Fixed
+- **Browser mode: YouTube songs failed with "The source refused the download".** YouTube now hands out
+  stream URLs that only start working a few seconds after the lookup (yt-dlp reports this as
+  `available_at` and waits for it). The relay fetched immediately and got HTTP 403. The relay and the
+  browser now wait until the stream is available ("Waiting N s for the site to release the stream"),
+  the relay retries a 403 once, and a stream the site still refuses now falls back to server
+  processing (when `fallback_to_server` is on) instead of failing with a misleading message.
+- Setting a site password while logged in as admin no longer locks the admin's own session out.
+- Self-updates now log when updated Python dependencies couldn't be installed.
+
 ## [2.2.0] — 2026-11-15
 
 ### New

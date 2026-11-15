@@ -16,7 +16,8 @@ from urllib.parse import quote
 from flask import Flask, Response, abort, jsonify, request, send_file, send_from_directory, session
 
 from . import __version__
-from .config import APP_DIR, Settings
+from .config import (ADMIN_EDITABLE, APP_DIR, FIELD_MAP, ConfigError, Settings, coerce_setting,
+                     read_admin_overrides, write_admin_overrides)
 from .jobs import JobManager, JobRejected
 from .relay import FallbackNeeded, Relay, RelayError, TokenStore, resolve
 from .auth import (AdminStore, LoginGuard, password_problem, qr_svg_data_uri, totp_uri)
@@ -276,7 +277,7 @@ def create_app(settings: Settings, start_background: bool = True) -> Flask:
     # ── auth gate + headers ─────────────────────────────────────────────
     @app.before_request
     def gate() -> Any:
-        if not settings.password or session.get("auth") is True:
+        if not settings.password or session.get("auth") is True or admin_session():
             return None
         path = request.path
         if any(path.startswith(p) for p in OPEN_PATHS):
@@ -627,6 +628,77 @@ def create_app(settings: Settings, start_background: bool = True) -> Flask:
                 not svc.admin.check_second_factor(str(data.get("code") or "")):
             return failed_login("admin", "Current password or code is wrong.")
         return jsonify({"ok": True, "recovery_codes": svc.admin.regenerate_recovery()})
+
+    def apply_live(name: str) -> None:
+        if name == "bandwidth_limit":
+            svc.bandwidth.set_limit(settings.bandwidth_limit)
+        elif name == "login_max_attempts":
+            svc.guard.max_attempts = max(1, settings.login_max_attempts)
+        elif name == "login_lockout_minutes":
+            svc.guard.base = max(1.0, settings.login_lockout_minutes) * 60
+
+    def setting_view(name: str) -> dict[str, Any]:
+        f = FIELD_MAP[name]
+        live, sensitive = ADMIN_EDITABLE[name]
+        value = getattr(settings, name)
+        view = {"name": name, "section": f.section, "type": f.type.__name__, "help": f.help,
+                "choices": list(f.choices) if f.choices else None, "source": settings.sources.get(name, "default"),
+                "locked": settings.sources.get(name) in ("env", "cli"), "restart": not live, "sensitive": sensitive,
+                "default": f.default}
+        if name == "password":
+            view.update(value="", is_set=bool(value), default="")
+        else:
+            view["value"] = value
+        return view
+
+    @app.get("/api/admin/settings")
+    @admin_only
+    def admin_settings() -> Any:
+        return jsonify({"settings": [setting_view(n) for n in ADMIN_EDITABLE]})
+
+    @app.post("/api/admin/settings")
+    @admin_only
+    def admin_settings_save() -> Any:
+        if (r := locked_response("admin")):
+            return r
+        data = body()
+        changes = data.get("changes")
+        if not isinstance(changes, dict) or not changes:
+            return _err("Nothing to save.")
+        parsed: dict[str, Any] = {}
+        for name, raw in changes.items():
+            if name not in ADMIN_EDITABLE:
+                return _err(f"'{name}' can't be changed from the admin panel.")
+            if settings.sources.get(name) in ("env", "cli"):
+                return _err(f"'{name}' is set by an environment variable or command-line flag on the server.")
+            try:
+                parsed[name] = None if raw is None else coerce_setting(name, raw)
+            except ConfigError as exc:
+                return _err(str(exc))
+        if any(ADMIN_EDITABLE[n][1] for n in parsed):
+            if not svc.admin.check_second_factor(str(data.get("code") or "")):
+                return failed_login("admin", "Security settings need a current 2FA code.")
+        overrides = read_admin_overrides(settings.data_path)
+        restart = []
+        for name, value in parsed.items():
+            if value is None:                                  # reset to config.ini / default
+                overrides.pop(name, None)
+                base = getattr(settings, "base_values", {})
+                value = base.get(name, FIELD_MAP[name].default)
+                settings.sources[name] = "config" if name in base else "default"
+            else:
+                overrides[name] = value
+                settings.sources[name] = "admin"
+            setattr(settings, name, value)
+            if ADMIN_EDITABLE[name][0]:
+                apply_live(name)
+            else:
+                restart.append(name)
+        write_admin_overrides(settings.data_path, overrides)
+        log.warning("Admin changed settings from %s: %s", client_ip(), ", ".join(sorted(parsed)))
+        msg = "Saved." + (f" Restart the server for {', '.join(restart)} to take effect." if restart else "")
+        return jsonify({"ok": True, "message": msg, "restart": restart,
+                        "settings": [setting_view(n) for n in ADMIN_EDITABLE]})
 
     @app.get("/api/admin/lockouts")
     @admin_only

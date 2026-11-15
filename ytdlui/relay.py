@@ -35,6 +35,8 @@ log = logging.getLogger("ytdlui")
 
 TOKEN_TTL = 6 * 3600
 CHUNK = 64 * 1024
+MAX_AVAILABLE_WAIT = 15.0
+RETRY_403_DELAY = 2.0
 # Hosts known to bind media URLs to the requesting IP and/or refuse CORS.
 NO_DIRECT_HOSTS = ("googlevideo.com", "youtube.com", "ytimg.com")
 SAFE_HEADERS = {"user-agent", "accept", "accept-language", "sec-fetch-mode", "accept-encoding"}
@@ -53,6 +55,7 @@ class Target:
     expires: float
     size: int | None
     bytes_sent: int = 0
+    available_at: float = 0.0  # Unix time before which the source answers 403 (YouTube)
 
 
 class TokenStore:
@@ -62,7 +65,7 @@ class TokenStore:
         self._items: dict[str, Target] = {}
         self._lock = threading.Lock()
 
-    def add(self, url: str, headers: dict[str, str], size: int | None) -> str:
+    def add(self, url: str, headers: dict[str, str], size: int | None, available_at: float = 0.0) -> str:
         family = socket.AF_UNSPEC
         ip = (parse_qs(urlparse(url).query).get("ip") or [""])[0]
         try:
@@ -74,7 +77,8 @@ class TokenStore:
         with self._lock:
             if len(self._items) >= self.max_items:
                 self._prune(now, force=True)
-            self._items[token] = Target(url, headers, family, now + self.ttl, size)
+            self._items[token] = Target(url, headers, family, now + self.ttl, size,
+                                        available_at=float(available_at or 0))
         return token
 
     def get(self, token: str) -> Target | None:
@@ -113,7 +117,13 @@ def _stream_entry(store: TokenStore, f: dict[str, Any], role: str, relay_on: boo
     direct = url if _direct_ok(url, headers) else None
     if not direct and not relay_on:
         raise FallbackNeeded("This site doesn't allow direct browser downloads and the relay is off.")
-    token = store.add(url, headers, size) if relay_on else None
+    # YouTube issues stream URLs that only start working a few seconds after the lookup;
+    # yt-dlp reports when as `available_at` and waits itself. Fetching earlier gets a 403.
+    try:
+        avail = float(f.get("available_at") or 0)
+    except (TypeError, ValueError):
+        avail = 0.0
+    token = store.add(url, headers, size, avail) if relay_on else None
     chunk = ((f.get("downloader_options") or {}).get("http_chunk_size")) or 8 * 1024 * 1024
     return {
         "role": role,
@@ -125,6 +135,8 @@ def _stream_entry(store: TokenStore, f: dict[str, Any], role: str, relay_on: boo
         "size": size,
         "exact_size": bool(f.get("filesize")),
         "chunk": int(chunk),
+        # seconds from now (server clock) until the URL works; the browser waits this long
+        "available_in": max(0.0, round(avail - time.time(), 2)) if avail else 0.0,
         "format_id": f.get("format_id"),
     }
 
@@ -248,41 +260,29 @@ class Relay:
         if not target:
             raise RelayError(404, "This link expired. Start the download again.")
 
-        url = target.url
         headers = {k: v for k, v in target.headers.items() if k.lower() != "accept-encoding"}
         headers["Accept-Encoding"] = "identity"
         if range_header and _valid_range(range_header):
             headers["Range"] = range_header
 
-        resp = conn = None
-        for _hop in range(6):
-            try:
-                check_url(url, allow_private=self.s.allow_private_urls)
-            except URLRejected:
-                raise RelayError(403, "Refusing to fetch that address.") from None
-            conn, path = self._connect(url, target.family)
-            try:
-                conn.request("GET", path, headers=headers)
-                resp = conn.getresponse()
-            except (OSError, http.client.HTTPException) as exc:
-                conn.close()
-                raise RelayError(502, f"Couldn't reach the source: {exc.__class__.__name__}") from None
-            if resp.status in (301, 302, 303, 307, 308) and resp.getheader("Location"):
-                url = urljoin(url, resp.getheader("Location"))
-                resp.read()
-                conn.close()
-                continue
-            break
-        else:
-            raise RelayError(502, "Too many redirects.")
+        # Don't ask before the source says the URL is valid (what yt-dlp does too).
+        wait = target.available_at - time.time()
+        if wait > 0:
+            time.sleep(min(wait + 0.5, MAX_AVAILABLE_WAIT))
 
-        assert resp is not None and conn is not None
+        resp, conn = self._fetch(target, headers)
+        if resp.status == 403:
+            # Freshly issued YouTube URLs can still 403 for a moment; retry once before giving up.
+            resp.read(512)
+            conn.close()
+            time.sleep(RETRY_403_DELAY)
+            resp, conn = self._fetch(target, headers)
         if resp.status >= 400:
             body = resp.read(512)
             conn.close()
             log.info("Relay upstream %s for token %s…: %r", resp.status, token[:6], body[:120])
             status = 410 if resp.status in (403, 410) else 502
-            raise RelayError(status, f"The source refused the request (HTTP {resp.status}).")
+            raise RelayError(status, f"The site refused to send this stream (HTTP {resp.status}).")
 
         out_headers = {h: resp.getheader(h) for h in PASS_HEADERS if resp.getheader(h)}
         out_headers["Cache-Control"] = "no-store"
@@ -307,6 +307,28 @@ class Relay:
                 conn.close()
 
         return resp.status, out_headers, body()
+
+    def _fetch(self, target: Target, headers: dict[str, str]) -> tuple[http.client.HTTPResponse, http.client.HTTPConnection]:
+        url = target.url
+        for _hop in range(6):
+            try:
+                check_url(url, allow_private=self.s.allow_private_urls)
+            except URLRejected:
+                raise RelayError(403, "Refusing to fetch that address.") from None
+            conn, path = self._connect(url, target.family)
+            try:
+                conn.request("GET", path, headers=headers)
+                resp = conn.getresponse()
+            except (OSError, http.client.HTTPException) as exc:
+                conn.close()
+                raise RelayError(502, f"Couldn't reach the source: {exc.__class__.__name__}") from None
+            if resp.status in (301, 302, 303, 307, 308) and resp.getheader("Location"):
+                url = urljoin(url, resp.getheader("Location"))
+                resp.read()
+                conn.close()
+                continue
+            return resp, conn
+        raise RelayError(502, "Too many redirects.")
 
     def _connect(self, url: str, family: int) -> tuple[http.client.HTTPConnection, str]:
         p = urlparse(url)

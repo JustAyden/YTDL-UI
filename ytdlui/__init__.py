@@ -1,4 +1,4 @@
 """YTDL-UI — a self-hosted web UI for yt-dlp."""
 
-__version__ = "2.2.0"
+__version__ = "2.3.0"
 __repo__ = "JustAyden/YTDL-UI"
