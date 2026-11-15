@@ -19,6 +19,7 @@ from . import __version__
 from .config import APP_DIR, Settings
 from .jobs import JobManager, JobRejected
 from .relay import FallbackNeeded, Relay, RelayError, TokenStore, resolve
+from .auth import (AdminStore, LoginGuard, password_problem, qr_svg_data_uri, totp_uri)
 from .security import RateLimiter, URLRejected, check_url, safe_equals
 from .throttle import MB, Bandwidth, ytdlp_rate
 from .updater import (AppUpdater, YtdlpUpdater, cleanup_old_binaries, download, ffmpeg_asset,
@@ -57,6 +58,14 @@ class Services:
         self.bandwidth = Bandwidth(settings.bandwidth_limit)
         self.relay = Relay(settings, self.tokens, self.bandwidth)
         self.limiter = RateLimiter()
+        self.guard = LoginGuard(os.path.join(settings.data_path, "lockouts.json"),
+                                settings.login_max_attempts, settings.login_lockout_minutes)
+        self.admin = AdminStore(settings.data_path, settings.admin_password) if settings.admin_enabled else None
+        if self.admin and self.admin.generated_password:
+            bar = "=" * 64
+            log.warning("\n%s\n  Initial admin password: %s\n  (also in %s)\n  Log in via the ⚙ button; "
+                        "you'll set up 2FA and choose a new password.\n%s",
+                        bar, self.admin.generated_password, self.admin.initial_file, bar)
         self.ytdlp_updater = YtdlpUpdater(settings, self.ytdlp, self.jobs.idle)
         self.app_updater = AppUpdater(settings)
         self.stop = threading.Event()
@@ -224,18 +233,45 @@ def create_app(settings: Settings, start_background: bool = True) -> Flask:
         return check_url(raw, allowed_sites=settings.allowed_sites,
                          allow_private=settings.allow_private_urls)
 
+    def admin_session() -> bool:
+        """Logged in as admin (setup may still be pending). Old sessions die on password change."""
+        return (svc.admin is not None and session.get("admin") is True
+                and session.get("admin_ver") == svc.admin.version)
+
     def is_admin() -> bool:
-        return bool(settings.admin_password) and session.get("admin") is True
+        return admin_session() and svc.admin.setup_step() == "done"
 
     def admin_only(fn: Callable) -> Callable:
         @wraps(fn)
         def wrapper(*a: Any, **kw: Any) -> Any:
-            if not settings.admin_password:
+            if svc.admin is None:
                 abort(404)
-            if not is_admin():
+            if not admin_session():
                 return _err("Admin login required.", 401)
+            step = svc.admin.setup_step()
+            if step != "done":
+                return _err("Finish the admin setup first.", 403, setup=step)
             return fn(*a, **kw)
         return wrapper
+
+    def locked_response(scope: str) -> tuple[Response, int] | None:
+        wait = svc.guard.locked_for(scope, client_ip())
+        if not wait:
+            return None
+        mins = (wait + 59) // 60
+        resp, code = _err(f"Too many failed attempts. Try again in {mins} minute{'s' if mins != 1 else ''}.",
+                          429, locked=wait)
+        resp.headers["Retry-After"] = str(wait)
+        return resp, code
+
+    def failed_login(scope: str, message: str) -> tuple[Response, int]:
+        ip = client_ip()
+        lock = svc.guard.failure(scope, ip)
+        if lock:
+            return locked_response(scope) or _err(message, 403)
+        left = svc.guard.remaining(scope, ip)
+        hint = f" {left} attempt{'s' if left != 1 else ''} left before a lockout." if left <= 3 else ""
+        return _err(message + hint, 403)
 
     # ── auth gate + headers ─────────────────────────────────────────────
     @app.before_request
@@ -287,15 +323,16 @@ def create_app(settings: Settings, start_background: bool = True) -> Flask:
     # ── auth ────────────────────────────────────────────────────────────
     @app.post("/api/login")
     def login() -> Any:
-        if (r := limited("login", 10)):
+        if (r := limited("login", 30)) or (r := locked_response("site")):
             return r
         if not settings.password:
             return jsonify({"ok": True})
         if safe_equals(str(body().get("password") or ""), settings.password):
+            svc.guard.success("site", client_ip())
             session.permanent = True
             session["auth"] = True
             return jsonify({"ok": True})
-        return _err("Wrong password.", 403)
+        return failed_login("site", "Wrong password.")
 
     @app.post("/api/logout")
     def logout() -> Any:
@@ -338,8 +375,9 @@ def create_app(settings: Settings, start_background: bool = True) -> Flask:
                 "allowed_sites": settings.allowed_sites,
             },
             "load": {**counts, "max_concurrent": settings.max_concurrent_jobs, "busy": svc.jobs.busy()},
-            "auth": {"password": bool(settings.password), "admin_enabled": bool(settings.admin_password),
-                     "admin": is_admin()},
+            "auth": {"password": bool(settings.password), "admin_enabled": svc.admin is not None,
+                     "admin": is_admin(),
+                     "admin_setup": svc.admin.setup_step() if admin_session() else None},
         }
         if is_admin():
             data["update"] = svc.app_updater.status()
@@ -502,23 +540,104 @@ def create_app(settings: Settings, start_background: bool = True) -> Flask:
     # ── admin ───────────────────────────────────────────────────────────
     @app.post("/api/admin/login")
     def admin_login() -> Any:
-        if not settings.admin_password:
+        if svc.admin is None:
             abort(404)
-        if (r := limited("admin-login", 5)):
+        if (r := limited("admin-login", 30)) or (r := locked_response("admin")):
             return r
-        if safe_equals(str(body().get("password") or ""), settings.admin_password):
-            session.permanent = True
-            session["admin"] = True
-            if settings.password:
-                session["auth"] = True
-            return jsonify({"ok": True})
-        log.warning("Failed admin login from %s", client_ip())
-        return _err("Wrong admin password.", 403)
+        data = body()
+        if not svc.admin.check_password(str(data.get("password") or "")):
+            log.warning("Failed admin login from %s", client_ip())
+            return failed_login("admin", "Wrong password or code.")
+        if svc.admin.totp_enabled:
+            code = str(data.get("code") or "").strip()
+            if not code:
+                return _err("Enter the 6-digit code from your authenticator app.", 401, need_code=True)
+            if not svc.admin.check_second_factor(code):
+                log.warning("Failed admin 2FA from %s", client_ip())
+                return failed_login("admin", "Wrong password or code.")
+        svc.guard.success("admin", client_ip())
+        session.permanent = True
+        session["admin"] = True
+        session["admin_ver"] = svc.admin.version
+        if settings.password:
+            session["auth"] = True
+        log.info("Admin logged in from %s", client_ip())
+        return jsonify({"ok": True, "setup": svc.admin.setup_step()})
 
     @app.post("/api/admin/logout")
     def admin_logout() -> Any:
         session.pop("admin", None)
+        session.pop("admin_ver", None)
         return jsonify({"ok": True})
+
+    def setup_session() -> tuple[Response, int] | None:
+        if svc.admin is None:
+            abort(404)
+        if not admin_session():
+            return _err("Admin login required.", 401)
+        return None
+
+    @app.post("/api/admin/totp/begin")
+    def totp_begin() -> Any:
+        if (r := setup_session()):
+            return r
+        if svc.admin.totp_enabled:
+            return _err("Two-factor authentication is already set up.", 409)
+        secret = svc.admin.begin_totp()
+        host = (request.host or "server").split(":")[0]
+        uri = totp_uri(secret, f"admin@{host}")
+        return jsonify({"secret": secret, "uri": uri, "qr": qr_svg_data_uri(uri)})
+
+    @app.post("/api/admin/totp/confirm")
+    def totp_confirm() -> Any:
+        if (r := setup_session()) or (r := locked_response("admin")):
+            return r
+        codes = svc.admin.confirm_totp(str(body().get("code") or ""))
+        if codes is None:
+            return failed_login("admin", "That code didn't match. Check your phone's clock and try the newest code.")
+        session["admin_ver"] = svc.admin.version
+        log.info("Admin enabled TOTP 2FA")
+        return jsonify({"ok": True, "recovery_codes": codes, "setup": svc.admin.setup_step()})
+
+    @app.post("/api/admin/password")
+    def admin_password() -> Any:
+        """Change the admin password — needs the current password and a 2FA code."""
+        if (r := setup_session()) or (r := locked_response("admin")):
+            return r
+        if not svc.admin.totp_enabled:
+            return _err("Set up two-factor authentication first.", 403, setup="totp")
+        data = body()
+        current, new = str(data.get("current") or ""), str(data.get("new") or "")
+        if (problem := password_problem(new, current)):
+            return _err(problem)                  # checked first so a typo doesn't burn the 2FA code
+        if not svc.admin.check_password(current) or not svc.admin.check_second_factor(str(data.get("code") or "")):
+            return failed_login("admin", "Current password or code is wrong.")
+        svc.admin.set_password(new)
+        session["admin_ver"] = svc.admin.version     # keep this session, sign out all others
+        log.warning("Admin password changed from %s", client_ip())
+        return jsonify({"ok": True, "message": "Password changed. Other admin sessions were signed out."})
+
+    @app.post("/api/admin/recovery-codes")
+    @admin_only
+    def admin_recovery() -> Any:
+        if (r := locked_response("admin")):
+            return r
+        data = body()
+        if not svc.admin.check_password(str(data.get("current") or "")) or \
+                not svc.admin.check_second_factor(str(data.get("code") or "")):
+            return failed_login("admin", "Current password or code is wrong.")
+        return jsonify({"ok": True, "recovery_codes": svc.admin.regenerate_recovery()})
+
+    @app.get("/api/admin/lockouts")
+    @admin_only
+    def admin_lockouts() -> Any:
+        return jsonify({"lockouts": svc.guard.lockouts()})
+
+    @app.post("/api/admin/unlock")
+    @admin_only
+    def admin_unlock() -> Any:
+        data = body()
+        return jsonify({"ok": svc.guard.unlock(str(data.get("scope") or ""), str(data.get("ip") or ""))})
 
     @app.get("/api/admin/status")
     @admin_only
@@ -549,6 +668,9 @@ def create_app(settings: Settings, start_background: bool = True) -> Flask:
                            "fallback": settings.fallback_to_server, "relay": settings.relay,
                            "wasm": svc.ffmpeg_core_urls()["source"]},
             "uptime": time.time() - svc.started,
+            "security": {"totp": svc.admin.totp_enabled, "recovery_left": svc.admin.recovery_left(),
+                         "lockouts": svc.guard.lockouts(), "max_attempts": settings.login_max_attempts,
+                         "lockout_minutes": settings.login_lockout_minutes},
             "config_path": _short(settings.config_path),
             "data_path": _short(settings.data_path),
         })

@@ -173,11 +173,15 @@
   <div class="modal-inner">
     <h2 id="admin-h"><span>Admin</span><form method="dialog"><button class="job-x" aria-label="Close">×</button></form></h2>
     <form id="admin-login" class="hidden">
-      <p>Enter the admin password from this server's config.</p>
+      <p>Admin login. On a new server the initial password is in the server log and in <span class="mono">data/initial-admin-password.txt</span>.</p>
       <div class="field">
-        <input type="password" id="admin-pass" autocomplete="current-password" aria-label="Admin password" required>
-        <button class="btn btn-primary" type="submit">Log in</button>
+        <input type="password" id="admin-pass" autocomplete="current-password" aria-label="Admin password" placeholder="Password" required>
       </div>
+      <div class="field hidden" id="admin-code-row">
+        <input type="text" id="admin-code" autocomplete="one-time-code" inputmode="numeric" aria-label="Authenticator code"
+               placeholder="6-digit code (or a recovery code)" maxlength="20">
+      </div>
+      <button class="btn btn-primary btn-full" type="submit">Log in</button>
       <div id="admin-login-alert"></div>
     </form>
     <div id="admin-panel" class="hidden"></div>

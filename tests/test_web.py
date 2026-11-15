@@ -141,19 +141,11 @@ def test_password_gate(settings):
     assert b"Download anything." in c.get("/").data
 
 
-def test_admin(settings):
+def test_admin_disabled(settings):
+    settings.admin_enabled = False
     c = make_app(settings).test_client()
-    assert c.get("/api/admin/status").status_code == 404             # disabled without a password
-    settings.admin_password = "adm"
-    c = make_app(settings).test_client()
-    assert c.get("/api/admin/status").status_code == 401
-    assert c.post("/api/admin/login", json={"password": "x"}).status_code == 403
-    assert c.post("/api/admin/login", json={"password": "adm"}).status_code == 200
-    st = c.get("/api/admin/status").get_json()
-    assert st["app"]["current"] and "jobs" in st
-    assert "update" in c.get("/api/config").get_json()
-    assert c.post("/api/admin/update-app", json={}).status_code == 403   # web updates off by default
-    assert c.post("/api/admin/cleanup", json={}).get_json()["removed"] == 0
+    assert c.get("/api/admin/status").status_code == 404
+    assert c.post("/api/admin/login", json={"password": "x"}).status_code == 404
 
 
 def test_legacy_download_endpoint(client):

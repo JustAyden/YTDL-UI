@@ -23,7 +23,7 @@ A clean, self-hosted web UI for downloading video and audio from YouTube and 1,8
 - **Process on the server *or* in the visitor's browser** — admins can move the heavy lifting onto users' devices ([how it works](#server-vs-browser-processing))
 - **Keeps itself up to date** — yt-dlp updates automatically; YTDL-UI checks GitHub for new releases ([details](#updates))
 - **Runs anywhere** — single-file apps for Windows, macOS and Linux (x64 + ARM), a Docker image, or plain Python
-- **Built for self-hosting** — bandwidth cap, optional password, admin panel, rate limits, queue limits, size/duration limits, site allow-list, SSRF protection, reverse-proxy aware
+- **Built for self-hosting** — admin panel with TOTP two-factor login and brute-force lockouts, bandwidth cap, optional password, rate limits, queue limits, size/duration limits, site allow-list, SSRF protection, reverse-proxy aware
 - **Light & dark theme**, works on phones, installable as an app, and accepts links shared from other apps
 - **Zero frontend build step** — plain HTML/CSS/JS, no npm, no bundler
 
@@ -138,7 +138,8 @@ The ones you're most likely to want:
 |---|---|---|
 | `host` / `port` | `127.0.0.1` / `5000` | Where to listen. `0.0.0.0` makes it reachable from your network. |
 | `password` | *(none)* | Ask visitors for a password before they can use the site. |
-| `admin_password` | *(none)* | Enables the admin panel (⚙ in the top bar). |
+| `admin_password` | *(generated)* | Initial admin password for the ⚙ panel. Leave empty to have one generated and printed in the log. The first login forces 2FA setup and a password change. |
+| `login_max_attempts` / `login_lockout_minutes` | `5` / `15` | Failed logins per IP before a lockout, and its length (doubles on repeats). |
 | `trust_proxy` | `0` | Set to `1` behind Caddy/Nginx/cloudflared (or `cloudflare`) so rate limits see real client IPs. |
 | `processing_mode` | `choice` | `server`, `browser` or `choice` — see above. |
 | `max_concurrent_jobs` | `2` | Server downloads that run at once; the rest queue. |
@@ -156,11 +157,20 @@ python server.py --version       # versions of YTDL-UI, yt-dlp, ffmpeg and the J
 
 ---
 
+## Admin panel & two-factor login
+
+Click ⚙ in the top bar. On a new install the initial password is printed in the server log (and saved to `data/initial-admin-password.txt`), unless you set `admin_password`. The first login walks you through:
+
+1. **Turning on two-factor authentication** — scan the QR code with an authenticator app and save the 8 recovery codes.
+2. **Choosing a new password** — the initial one stops working.
+
+After that, logging in needs the password **and** a 6-digit code (or a recovery code). The password can be changed from the panel's *Security* section with the current password plus a code; that signs out every other admin session. Too many wrong passwords or codes lock that IP out (5 tries → 15 minutes, doubling each time); locked IPs are listed in the panel with an *Unlock* button. Lost your phone and recovery codes? Run `python server.py --reset-admin` (or `ytdl-ui --reset-admin`) on the server and restart.
+
 ## Hosting it for other people
 
 - Keep the default `host = 127.0.0.1` and put a reverse proxy or tunnel in front (Caddy, Nginx, [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)), then set `trust_proxy = 1`.
 - Downloads run as background jobs, so long playlists work fine behind proxies with short timeouts (Cloudflare's is 100 s).
-- Set `password` for a private instance, `admin_password` to manage it, and consider `processing_mode = browser` to keep CPU and disk usage near zero.
+- Set `password` for a private instance (it gets the same lockout protection), and consider `processing_mode = browser` to keep CPU and disk usage near zero.
 - `bandwidth_limit` (10 MB/s by default) keeps downloads from saturating the server's connection — raise it on a fast link, lower it on a home connection you share.
 - `sudo sh install.sh` sets up a hardened systemd service (dedicated user, read-only system, restricted syscalls). See **[SETUP.md](SETUP.md)** for a full Debian + Caddy walkthrough, Cloudflare Tunnel and Docker examples.
 

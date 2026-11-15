@@ -65,8 +65,17 @@ FIELDS: tuple[Field, ...] = (
     # ── security ──────────────────────────────────────────────────────────
     Field("password", "security", str, "",
           "Optional password visitors must enter before using the site."),
+    Field("admin_enabled", "security", bool, True,
+          "Enable the admin panel (⚙): updates, job overview, cleanup, password and 2FA settings."),
     Field("admin_password", "security", str, "",
-          "Enables the admin panel (updates, job overview, cleanup). Leave empty to disable."),
+          "Initial admin password, used only until the admin replaces it (the first login forces "
+          "a TOTP 2FA setup and a password change; afterwards credentials live in data/admin.json). "
+          "Empty = generate a random one on first start and print it to the log and "
+          "data/initial-admin-password.txt. Lost access? Run with --reset-admin."),
+    Field("login_max_attempts", "security", int, 5,
+          "Failed password/2FA attempts allowed per IP before that IP is locked out."),
+    Field("login_lockout_minutes", "security", int, 15,
+          "First lockout length. Each repeat lockout of the same IP doubles it (max 24 h)."),
     Field("allowed_sites", "security", list, [],
           "Comma-separated domains users may download from (e.g. youtube.com, youtu.be, "
           "soundcloud.com). Empty = anything yt-dlp supports."),

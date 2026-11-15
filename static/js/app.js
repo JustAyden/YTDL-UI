@@ -646,7 +646,8 @@ async function startDownload() {
 async function openAdmin() {
   const dlg = $("admin-modal");
   if (!dlg.open) dlg.showModal();
-  if (!CONFIG.auth.admin) {
+  const setup = CONFIG.auth.admin_setup;
+  if (!CONFIG.auth.admin && !(setup && setup !== "done")) {
     $("admin-login").classList.remove("hidden");
     $("admin-panel").classList.add("hidden");
     setTimeout(() => $("admin-pass").focus(), 50);
@@ -655,6 +656,7 @@ async function openAdmin() {
   $("admin-login").classList.add("hidden");
   const panel = $("admin-panel");
   panel.classList.remove("hidden");
+  if (setup === "totp" || setup === "password") { renderSetup(setup); return; }
   if (!panel.childElementCount) panel.append(h("p", {}, h("span", { class: "spinner" }), "  Loading…"));
   try {
     const [st, jl] = await Promise.all([api("api/admin/status"), api("api/admin/jobs")]);
@@ -692,6 +694,117 @@ function adminAction(label, path, { confirmText, body, cls = "btn-secondary", af
       }
     },
   });
+}
+
+// ── admin security: 2FA setup, password change ─────────────────────────
+const field = (attrs) => h("div", { class: "field" }, h("input", { required: true, ...attrs }));
+const codeInput = (id = "sec-code") => field({ id, type: "text", inputmode: "numeric", autocomplete: "one-time-code",
+  placeholder: "6-digit code from your authenticator", maxlength: "20", "aria-label": "Authenticator code" });
+
+async function refreshConfig() { CONFIG = await api("api/config"); updateAdminDot(); }
+
+function recoveryBlock(codes, onDone) {
+  const text = "YTDL-UI admin recovery codes — each works once instead of a 2FA code.\n\n" + codes.join("\n") + "\n";
+  return h("div", {},
+    h("p", { text: "Save these recovery codes somewhere safe. Each one can be used once if you lose your phone. They won't be shown again." }),
+    h("pre", { class: "mono", style: "background:var(--bg-alt);border:1px solid var(--border);border-radius:6px;padding:12px;columns:2;font-size:0.85rem;margin-bottom:12px", text: codes.join("\n") }),
+    h("div", { class: "btn-row" },
+      h("button", { class: "btn btn-small btn-secondary", type: "button", text: "Download as .txt",
+        onclick: () => saveBlob(new Blob([text], { type: "text/plain" }), "ytdl-ui-recovery-codes.txt") }),
+      h("button", { class: "btn btn-small btn-secondary", type: "button", text: "Copy",
+        onclick: () => navigator.clipboard?.writeText(text) }),
+      onDone ? h("button", { class: "btn btn-small btn-primary", type: "button", text: "I've saved them — continue", onclick: onDone }) : null));
+}
+
+function passwordChangeForm({ intro, submitLabel = "Change password", onDone }) {
+  const msg = h("div");
+  const form = h("form", { autocomplete: "off" },
+    intro ? h("p", { text: intro }) : null,
+    field({ id: "pw-current", type: "password", autocomplete: "current-password", placeholder: "Current password", "aria-label": "Current password" }),
+    field({ id: "pw-new", type: "password", autocomplete: "new-password", placeholder: "New password (10+ characters)", minlength: "10", "aria-label": "New password" }),
+    field({ id: "pw-confirm", type: "password", autocomplete: "new-password", placeholder: "Repeat new password", "aria-label": "Repeat new password" }),
+    codeInput("pw-code"),
+    h("button", { class: "btn btn-primary btn-full", type: "submit", text: submitLabel }), msg);
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const v = (id) => form.querySelector("#" + id).value;
+    if (v("pw-new") !== v("pw-confirm")) { alertBox(msg, "error", "The new passwords don't match."); return; }
+    try {
+      const r = await api("api/admin/password", { method: "POST", body: { current: v("pw-current"), new: v("pw-new"), code: v("pw-code") } });
+      form.reset();
+      alertBox(msg, "success", r.message);
+      onDone?.();
+    } catch (err) { alertBox(msg, "error", err.message); }
+  });
+  return form;
+}
+
+async function renderSetup(step) {
+  const panel = $("admin-panel");
+  const steps = h("p", { class: "mono", style: "font-size:0.75rem", text: `Admin setup · step ${step === "totp" ? 1 : 2} of 2` });
+  if (step === "password") {
+    panel.replaceChildren(steps, h("h3", { style: "margin-bottom:8px", text: "Choose a new admin password" }),
+      passwordChangeForm({
+        intro: "Two-factor authentication is on. Now replace the initial password — enter it once more, pick a new one, and confirm with a fresh code from your app.",
+        submitLabel: "Save new password",
+        onDone: async () => { await refreshConfig(); setTimeout(openAdmin, 700); },
+      }));
+    return;
+  }
+  panel.replaceChildren(steps, h("p", {}, h("span", { class: "spinner" }), "  Preparing…"));
+  let t;
+  try { t = await api("api/admin/totp/begin", { method: "POST", body: {} }); }
+  catch (e) { panel.replaceChildren(h("div", { class: "alert alert-error", text: e.message })); return; }
+  const msg = h("div");
+  const form = h("form", {}, codeInput("totp-code"),
+    h("button", { class: "btn btn-primary btn-full", type: "submit", text: "Turn on 2FA" }), msg);
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    try {
+      const r = await api("api/admin/totp/confirm", { method: "POST", body: { code: form.querySelector("#totp-code").value } });
+      panel.replaceChildren(steps, h("h3", { style: "margin-bottom:8px", text: "2FA is on" }),
+        recoveryBlock(r.recovery_codes, async () => { await refreshConfig(); openAdmin(); }));
+    } catch (err) { alertBox(msg, "error", err.message); }
+  });
+  panel.replaceChildren(steps,
+    h("h3", { style: "margin-bottom:8px", text: "Set up two-factor authentication" }),
+    h("p", { text: "Admin logins need a code from an authenticator app (Google Authenticator, Microsoft Authenticator, Aegis, 2FAS, 1Password, Bitwarden…). Scan the QR code, then enter the 6-digit code it shows." }),
+    h("div", { style: "display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:14px" },
+      t.qr ? h("img", { src: t.qr, alt: "QR code for your authenticator app", width: "180", height: "180", style: "border-radius:8px;background:#fff" }) : null,
+      h("div", { style: "flex:1;min-width:200px" },
+        h("div", { class: "modal-section-title", text: "Can't scan? Enter this key:" }),
+        h("div", { class: "mono", style: "word-break:break-all;font-size:0.9rem;user-select:all", text: t.secret.match(/.{1,4}/g).join(" ") }),
+        h("p", { style: "margin-top:6px;font-size:0.75rem", text: "Time-based (TOTP), 6 digits, 30 seconds." }))),
+    form);
+  setTimeout(() => form.querySelector("#totp-code")?.focus(), 50);
+}
+
+function securitySection(sec) {
+  const lock = sec.lockouts.length
+    ? h("div", { class: "admin-jobs" }, sec.lockouts.map((l) => h("div", {},
+        h("span", { text: l.scope }), h("span", { class: "t", text: l.ip }),
+        h("span", { text: `${Math.ceil(l.seconds / 60)} min` }),
+        adminAction("Unlock", "api/admin/unlock", { body: { scope: l.scope, ip: l.ip } }))))
+    : h("p", { style: "margin:0", text: "No one is locked out." });
+  const regen = h("form", {},
+    field({ id: "rc-current", type: "password", autocomplete: "current-password", placeholder: "Current password", "aria-label": "Current password" }),
+    codeInput("rc-code"),
+    h("button", { class: "btn btn-small btn-secondary", type: "submit", text: "Generate new recovery codes" }));
+  regen.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    try {
+      const r = await api("api/admin/recovery-codes", { method: "POST",
+        body: { current: regen.querySelector("#rc-current").value, code: regen.querySelector("#rc-code").value } });
+      regen.replaceWith(recoveryBlock(r.recovery_codes));
+    } catch (err) { alertBox($("admin-msg"), "error", err.message); }
+  });
+  return h("div", { class: "modal-section" },
+    h("div", { class: "modal-section-title", text: "Security" }),
+    h("p", { style: "font-size:0.8rem", text: `Two-factor authentication: ${sec.totp ? "on" : "off"} · ${sec.recovery_left} recovery code${sec.recovery_left === 1 ? "" : "s"} left · lockout after ${sec.max_attempts} failed attempts (${sec.lockout_minutes} min, doubling on repeats)` }),
+    h("details", { style: "margin-bottom:10px" }, h("summary", { text: "Change admin password", style: "cursor:pointer;font-size:0.85rem;margin-bottom:8px" }),
+      passwordChangeForm({ intro: "Needs your current password and a code from your authenticator app. Other admin sessions will be signed out." })),
+    h("details", { style: "margin-bottom:10px" }, h("summary", { text: "Recovery codes", style: "cursor:pointer;font-size:0.85rem;margin-bottom:8px" }), regen),
+    h("div", { class: "modal-section-title", style: "margin-top:6px", text: "Locked-out IPs" }), lock);
 }
 
 function renderAdmin(st, jobList) {
@@ -751,6 +864,7 @@ function renderAdmin(st, jobList) {
         jj.status === "running" || jj.status === "queued" ? adminAction("×", `api/admin/jobs/${jj.id}/cancel`) : null,
       ))) : h("p", { text: "None right now." }),
     ),
+    securitySection(st.security),
     h("div", { class: "btn-row" },
       adminAction("Clear finished downloads", "api/admin/cleanup"),
       adminAction("Restart server", "api/admin/restart", { confirmText: "Restart the server? Running downloads will be stopped.",
@@ -758,6 +872,7 @@ function renderAdmin(st, jobList) {
       h("button", { class: "btn btn-small btn-secondary", type: "button", text: "Log out", onclick: async () => {
         await api("api/admin/logout", { method: "POST" }).catch(() => {});
         CONFIG.auth.admin = false;
+        CONFIG.auth.admin_setup = null;
         $("admin-panel").replaceChildren();
         $("admin-dot").classList.add("hidden");
         openAdmin();
@@ -818,14 +933,22 @@ function bind() {
   $("admin-login").addEventListener("submit", async (e) => {
     e.preventDefault();
     try {
-      await api("api/admin/login", { method: "POST", body: { password: $("admin-pass").value } });
+      await api("api/admin/login", { method: "POST", body: { password: $("admin-pass").value, code: $("admin-code").value } });
       $("admin-pass").value = "";
+      $("admin-code").value = "";
+      $("admin-code-row").classList.add("hidden");
       clear($("admin-login-alert"));
-      CONFIG = await api("api/config");
+      await refreshConfig();
+      $("admin-panel").replaceChildren();
       openAdmin();
-      updateAdminDot();
     } catch (err) {
-      alertBox($("admin-login-alert"), "error", err.message);
+      if (err.data?.need_code) {
+        $("admin-code-row").classList.remove("hidden");
+        $("admin-code").focus();
+        alertBox($("admin-login-alert"), "info", err.message);
+      } else {
+        alertBox($("admin-login-alert"), err.status === 429 ? "warn" : "error", err.message);
+      }
     }
   });
   for (const dlg of document.querySelectorAll("dialog.modal")) {

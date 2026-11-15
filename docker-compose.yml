@@ -16,7 +16,7 @@ services:
       YTDLUI_PROCESSING_MODE: choice           # server | browser | choice
       YTDLUI_PROCESSING_DEFAULT: server        # server | browser | auto
       # YTDLUI_PASSWORD: change-me
-      # YTDLUI_ADMIN_PASSWORD: change-me-too
+      # YTDLUI_ADMIN_PASSWORD: initial-admin-pass   # otherwise generated; see `docker logs ytdl-ui`
       # YTDLUI_TRUST_PROXY: "1"
       # YTDLUI_COOKIES_FILE: /app/cookies.txt
 

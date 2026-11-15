@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.2.0] — 2026-11-15
+
+### New
+- **Two-factor authentication (TOTP) for the admin panel.** Works with any authenticator app
+  (Google/Microsoft Authenticator, Aegis, 2FAS, 1Password, Bitwarden…), with a QR code for setup and
+  8 one-time recovery codes. Each code can only be used once.
+- **Guided first login.** The first time an admin opens the panel they must turn on 2FA, then replace
+  the initial password. The initial password comes from `admin_password` or, if that's empty, is
+  generated on first start and printed to the log and `data/initial-admin-password.txt`.
+- **Change the admin password from the panel** — requires the current password and a 2FA code;
+  every other admin session is signed out. Recovery codes can be regenerated the same way.
+- **Brute-force lockouts** for the admin and site passwords: after `login_max_attempts` (5) failures an
+  IP is locked out for `login_lockout_minutes` (15), doubling on every repeat (max 24 h). Lockouts
+  survive restarts; admins can see and lift them in the panel.
+- `--reset-admin` to recover a lost admin login from the server's command line.
+- The admin panel is now on by default (`admin_enabled = true`).
+
+### Upgrading from 2.1
+- Your existing `admin_password` becomes the initial password: the next admin login walks you through
+  2FA setup and asks for a new password. After that, `admin_password` in the config is no longer used.
+
 ## [2.1.0] — 2026-11-15
 
 ### New

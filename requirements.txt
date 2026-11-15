@@ -1,6 +1,8 @@
 # Web server
 flask>=3.0,<4
 waitress>=3.0,<4
+# QR codes for setting up two-factor authentication
+segno>=1.6
 # yt-dlp with its recommended extras (YouTube challenge solver scripts, curl_cffi
 # impersonation, mutagen for cover art, …). YTDL-UI keeps it up to date itself.
 yt-dlp[default]

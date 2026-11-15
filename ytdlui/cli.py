@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import socket
 import sys
 import time
@@ -79,6 +80,9 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--fetch-wasm", action="store_true",
                    help="download the ffmpeg.wasm core for wasm_source = local")
     g.add_argument("--print-config", action="store_true", help="print the effective settings")
+    g.add_argument("--reset-admin", action="store_true",
+                   help="forget the admin password, 2FA and lockouts (a new initial password is "
+                        "generated on next start, or admin_password from the config is used)")
     g.add_argument("--write-example-config", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--wait-for-port", action="store_true", help=argparse.SUPPRESS)
     return p
@@ -125,6 +129,17 @@ def main(argv: list[str] | None = None) -> int:
             if k in ("password", "admin_password") and v:
                 v = "********"
             print(f"{k} = {v}")
+        return 0
+
+    if args.reset_admin:
+        removed = []
+        for name in ("admin.json", "lockouts.json", "initial-admin-password.txt"):
+            path = os.path.join(settings.data_path, name)
+            if os.path.exists(path):
+                os.remove(path)
+                removed.append(name)
+        print(f"Admin credentials reset ({', '.join(removed) or 'nothing to remove'}).")
+        print("Restart YTDL-UI; the first admin login will set up 2FA and a new password again.")
         return 0
 
     from .updater import AppUpdater, YtdlpUpdater, install_ffmpeg, install_method

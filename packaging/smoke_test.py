@@ -59,6 +59,21 @@ def main(exe: str) -> int:
             cfg = json.load(r)
             assert cfg["ytdlp_ok"], "server can't find yt-dlp"
         assert os.path.isdir(os.path.join(work, "data")), "data dir not created next to the executable"
+        # admin first-login: generated password works and the 2FA QR code renders (segno bundled)
+        with open(os.path.join(work, "data", "initial-admin-password.txt"), encoding="utf-8") as fh:
+            pw = fh.read().strip()
+        import http.cookiejar
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+
+        def post(path, body):
+            req = urllib.request.Request(base + path, data=json.dumps(body).encode(), method="POST",
+                                         headers={"Content-Type": "application/json"})
+            with opener.open(req, timeout=10) as r:
+                return json.load(r)
+        assert post("/api/admin/login", {"password": pw})["setup"] == "totp"
+        totp = post("/api/admin/totp/begin", {})
+        assert totp["qr"] and totp["qr"].startswith("data:image/svg+xml"), "QR code missing (segno not bundled?)"
+        print("admin 2FA setup: ok")
         print("smoke test passed")
         return 0
     finally:

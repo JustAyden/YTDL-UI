@@ -102,8 +102,12 @@ trust_proxy = 1
 
 [security]
 # password = something-long        # makes the instance private
-admin_password = something-else    # enables the ⚙ admin panel
+# admin_password = …               # initial admin password; leave empty to get a generated one
 ```
+
+The generated initial admin password is in `journalctl -u ytdlui` and in
+`/opt/ytdlui/data/initial-admin-password.txt`. Open ⚙ in the web UI, log in, set up 2FA with your
+authenticator app and choose your own password.
 
 Then `sudo systemctl restart ytdlui`.
 
@@ -177,7 +181,8 @@ limit never applies. Very large single files are delivered with resumable range 
 docker compose up -d          # uses docker-compose.yml from this repo
 # or
 docker run -d --name ytdl-ui -p 5000:5000 -v ytdlui-data:/app/data \
-  -e YTDLUI_ADMIN_PASSWORD=change-me ghcr.io/justayden/ytdl-ui:latest
+  ghcr.io/justayden/ytdl-ui:latest
+docker logs ytdl-ui             # shows the initial admin password
 ```
 
 The image (amd64 + arm64) includes ffmpeg and Deno. Any setting can be passed as `YTDLUI_<NAME>`;
@@ -208,8 +213,9 @@ running container between image releases).
 trust_proxy = 1
 
 [security]
-admin_password = …
 # password = …                       # private instance
+login_max_attempts = 5
+login_lockout_minutes = 15
 rate_limit = 20
 download_rate_limit = 5
 # allowed_sites = youtube.com, youtu.be, music.youtube.com, soundcloud.com
@@ -245,6 +251,7 @@ well if you only want sites the browser can fetch on its own.
 | Update only yt-dlp | happens automatically; force it with `sudo -u ytdlui /opt/ytdlui/.venv/bin/python /opt/ytdlui/server.py --update-ytdlp` |
 | Versions | `sudo -u ytdlui /opt/ytdlui/.venv/bin/python /opt/ytdlui/server.py --version` |
 | Effective settings | `… server.py --print-config` |
+| Lost admin login / 2FA | `sudo -u ytdlui /opt/ytdlui/.venv/bin/python /opt/ytdlui/server.py --reset-admin && sudo systemctl restart ytdlui` |
 | Uninstall | `sudo systemctl disable --now ytdlui && sudo rm -rf /opt/ytdlui /etc/systemd/system/ytdlui.service && sudo userdel ytdlui` |
 
 Temporary files live in `/opt/ytdlui/data/tmp` and are deleted `job_ttl_minutes` after each download
