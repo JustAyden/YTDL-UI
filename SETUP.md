@@ -1,251 +1,250 @@
-# YTDLUI Setup Guide
+# YTDL-UI setup guide
 
-How to run YTDLUI on Windows (quick start) or deploy it on a Debian server behind Caddy.
+Step-by-step instructions for every way of running YTDL-UI. For an overview, settings and
+troubleshooting see the [README](README.md).
 
----
-
-## Windows — Quick Start
-
-Download and install YT-DLP and FFMpeg
-
-### 1. Install Python
-
-Download and install Python 3.10+ from https://www.python.org/downloads/
-**Check "Add Python to PATH"** during installation.
-
-### 2. Install Flask
-
-Open a terminal (Command Prompt or PowerShell) in the project folder and run:
-
-```powershell
-pip install flask flask-cors
-```
-
-### 3. Run
-
-Double-click `start.bat`, or run:
-
-```powershell
-python server.py
-```
-
-### 4. Open the UI
-
-Navigate to http://localhost:5000 in your browser.
-
-That's it. The bundled `yt-dlp.exe` and `ffmpeg.exe` are detected automatically.
+- [Windows](#windows)
+- [macOS](#macos)
+- [Linux desktop](#linux-desktop)
+- [Debian / Ubuntu server with Caddy (HTTPS)](#debian--ubuntu-server-with-caddy-https)
+- [Cloudflare Tunnel](#cloudflare-tunnel)
+- [Docker](#docker)
+- [Raspberry Pi, FreeBSD, Android (Termux)](#raspberry-pi-freebsd-android-termux)
+- [Recommended settings for a public instance](#recommended-settings-for-a-public-instance)
+- [Maintenance](#maintenance)
 
 ---
 
-## Linux / macOS — Quick Start
+## Windows
 
-### 1. Install dependencies
+**Easiest:** download `ytdl-ui-windows-x64.exe` (or `-arm64.exe` for ARM laptops) from the
+[latest release](https://github.com/JustAyden/YTDL-UI/releases/latest), put it in its own folder
+and double-click it. A console window shows the log and your browser opens at
+http://localhost:5000. On first start it downloads ffmpeg into `data\bin\` by itself.
+Close the console window to stop it.
 
-**Debian / Ubuntu:**
-```bash
-sudo apt install python3 python3-pip ffmpeg
-pip3 install flask flask-cors
-```
+**From source:**
 
-**macOS (Homebrew):**
-```bash
-brew install python ffmpeg
-pip3 install flask flask-cors
-```
+1. Install Python 3.10+ from [python.org](https://www.python.org/downloads/) — tick **"Add python.exe to PATH"**.
+2. Optional but recommended for YouTube: install [Deno](https://deno.land) (`winget install DenoLand.Deno`) or Node.js.
+3. Download the repository (green **Code → Download ZIP**, or `git clone`), then double-click **`start.bat`**.
+   The first run creates `.venv\` and installs everything.
+4. ffmpeg: `start.bat --install-ffmpeg`, or drop `ffmpeg.exe` next to `server.py`.
 
-### 2. Install yt-dlp
-
-```bash
-sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
-  -o /usr/local/bin/yt-dlp
-sudo chmod a+rx /usr/local/bin/yt-dlp
-```
-
-### 3. Run
-
-```bash
-python3 server.py
-```
-
-Open http://localhost:5000.
+To make it reachable from other devices on your network: `start.bat --host 0.0.0.0`.
 
 ---
 
-## Debian Server — Production Deployment with Caddy
+## macOS
 
-A guide for running YTDLUI as a permanent service behind Caddy (with automatic HTTPS).
+**App:** download `ytdl-ui-macos-arm64` (Apple Silicon) or `ytdl-ui-macos-x64` (Intel), then in Terminal:
 
-### Prerequisites
+```bash
+cd ~/Downloads
+xattr -d com.apple.quarantine ytdl-ui-macos-arm64   # the app isn't code-signed
+chmod +x ytdl-ui-macos-arm64
+./ytdl-ui-macos-arm64
+brew install ffmpeg deno                            # if you don't have them yet
+```
 
-- Debian 11 (Bullseye) or Debian 12 (Bookworm)
-- Root or `sudo` access
-- A domain pointed at your server (optional — plain HTTP also works)
+**From source:** `brew install python ffmpeg deno`, download the repository, then double-click
+**`start.command`** (or run `./start.sh` in Terminal).
 
 ---
 
-### 1. Update the system
+## Linux desktop
 
 ```bash
-sudo apt update && sudo apt upgrade -y
+sudo apt install python3 python3-venv ffmpeg     # Fedora: dnf install python3 ffmpeg-free · Arch: pacman -S python ffmpeg
+curl -fsSL https://deno.land/install.sh | sh     # JavaScript runtime for YouTube (or install nodejs)
+git clone https://github.com/JustAyden/YTDL-UI && cd YTDL-UI
+./start.sh
 ```
 
-### 2. Install Python and ffmpeg
+Or download `ytdl-ui-linux-x64` / `ytdl-ui-linux-arm64` from the releases, `chmod +x` it and run it.
+
+---
+
+## Debian / Ubuntu server with Caddy (HTTPS)
+
+Tested on Debian 12/13 and Ubuntu 22.04/24.04. You need root and, for HTTPS, a domain pointing at the server.
+
+### 1. Install YTDL-UI as a service
 
 ```bash
-sudo apt install -y python3 python3-pip python3-venv ffmpeg curl
+sudo apt install -y git
+git clone https://github.com/JustAyden/YTDL-UI /tmp/ytdl-ui
+sudo sh /tmp/ytdl-ui/install.sh
 ```
 
-### 3. Install yt-dlp
+`install.sh`:
+
+- installs Python, ffmpeg and friends with your package manager
+- creates an unprivileged `ytdlui` system user
+- installs the app to `/opt/ytdlui` with its own virtual environment
+- creates `/opt/ytdlui/config.ini` from the example
+- installs and starts the hardened `ytdlui` systemd service on `127.0.0.1:5000`
+
+Install a JavaScript runtime so YouTube offers all qualities:
 
 ```bash
-sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
-  -o /usr/local/bin/yt-dlp
-sudo chmod a+rx /usr/local/bin/yt-dlp
-yt-dlp --version
+curl -fsSL https://deno.land/install.sh | sudo DENO_INSTALL=/usr/local sh
+sudo systemctl restart ytdlui
 ```
 
-### 4. Install Caddy
+### 2. Configure
+
+Edit `/opt/ytdlui/config.ini` — at least:
+
+```ini
+[server]
+trust_proxy = 1
+
+[security]
+# password = something-long        # makes the instance private
+admin_password = something-else    # enables the ⚙ admin panel
+```
+
+Then `sudo systemctl restart ytdlui`.
+
+### 3. Caddy
 
 ```bash
-sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
-  | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
-  | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
 sudo apt update && sudo apt install -y caddy
 ```
 
-### 5. Deploy the app
+`/etc/caddy/Caddyfile`:
 
-```bash
-sudo mkdir -p /srv/ytdlui
-
-# Copy files (adjust path as needed)
-sudo cp server.py index.html /srv/ytdlui/
-
-# Python virtual environment
-cd /srv/ytdlui
-sudo python3 -m venv venv
-sudo venv/bin/pip install flask flask-cors
-
-# Temp dir and permissions
-sudo mkdir -p /srv/ytdlui/.tmp
-sudo chown -R www-data:www-data /srv/ytdlui
-```
-
-> `server.py` auto-detects `yt-dlp` and `ffmpeg` from PATH on Linux. No `.exe` files needed.
-
-### 6. Create a systemd service
-
-Create `/etc/systemd/system/ytdlui.service`:
-
-```ini
-[Unit]
-Description=YTDLUI — yt-dlp web downloader
-After=network.target
-
-[Service]
-Type=simple
-User=www-data
-WorkingDirectory=/srv/ytdlui
-ExecStart=/srv/ytdlui/venv/bin/python server.py
-Restart=on-failure
-RestartSec=5s
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable and start:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now ytdlui
-sudo systemctl status ytdlui
-```
-
-View logs:
-
-```bash
-sudo journalctl -u ytdlui -f
-```
-
-### 7. Configure Caddy
-
-Edit `/etc/caddy/Caddyfile`.
-
-**With a domain (automatic HTTPS):**
-
-```
-yourdomain.com {
-    reverse_proxy localhost:5000
-    encode gzip
-
-    header {
-        X-Content-Type-Options nosniff
-        X-Frame-Options DENY
-        -Server
+```caddy
+ytdl.example.com {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:5000 {
+        flush_interval -1   # pass downloads and relayed streams through immediately
     }
 }
 ```
 
-**HTTP only (no domain):**
+`sudo systemctl reload caddy` — Caddy gets a certificate automatically.
 
+### 4. Firewall
+
+```bash
+sudo ufw allow 80/tcp && sudo ufw allow 443/tcp && sudo ufw enable
 ```
-:80 {
-    reverse_proxy localhost:5000
-    encode gzip
+
+Port 5000 stays closed: the app only listens on `127.0.0.1`.
+
+<details>
+<summary>Nginx instead of Caddy</summary>
+
+```nginx
+server {
+    server_name ytdl.example.com;
+    client_max_body_size 1m;
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;            # stream downloads and relayed media
+        proxy_read_timeout 1h;
+        proxy_send_timeout 1h;
+    }
+    # listen 443 ssl; … (certbot --nginx adds this)
 }
 ```
-
-Reload Caddy:
-
-```bash
-sudo systemctl reload caddy
-```
-
-### 8. Firewall (ufw)
-
-```bash
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-sudo ufw enable
-```
-
-### 9. Keep yt-dlp updated
-
-```bash
-sudo yt-dlp -U
-```
-
-Automate with a weekly cron job:
-
-```bash
-echo "0 3 * * 0 root /usr/local/bin/yt-dlp -U --quiet" \
-  | sudo tee /etc/cron.d/ytdlp-update
-```
+</details>
 
 ---
 
-## Troubleshooting
+## Cloudflare Tunnel
 
-| Symptom | Fix |
+No open ports at all: install [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/),
+create a tunnel and point a public hostname at `http://127.0.0.1:5000`. In `config.ini` set
+`trust_proxy = cloudflare` so rate limits use the visitor's real IP.
+
+Long playlist downloads are fine: they run as background jobs, so Cloudflare's 100-second request
+limit never applies. Very large single files are delivered with resumable range requests.
+
+---
+
+## Docker
+
+```bash
+docker compose up -d          # uses docker-compose.yml from this repo
+# or
+docker run -d --name ytdl-ui -p 5000:5000 -v ytdlui-data:/app/data \
+  -e YTDLUI_ADMIN_PASSWORD=change-me ghcr.io/justayden/ytdl-ui:latest
+```
+
+The image (amd64 + arm64) includes ffmpeg and Deno. Any setting can be passed as `YTDLUI_<NAME>`;
+a `config.ini` can be mounted at `/app/config.ini`. Behind a reverse proxy publish only to
+localhost (`127.0.0.1:5000:5000`) and set `YTDLUI_TRUST_PROXY=1`.
+
+Update with `docker compose pull && docker compose up -d` (yt-dlp also updates itself inside the
+running container between image releases).
+
+---
+
+## Raspberry Pi, FreeBSD, Android (Termux)
+
+- **Raspberry Pi 4/5 with a 64-bit OS:** use `ytdl-ui-linux-arm64`, the Docker image, or `install.sh`.
+  32-bit Raspberry Pi OS: run from source with `./start.sh`. On small boards consider
+  `processing_mode = browser` so phones and laptops do the converting.
+- **FreeBSD:** `pkg install python3 ffmpeg node` then `./start.sh`.
+- **Android (Termux):** `pkg install python ffmpeg nodejs git`, clone the repo, `./start.sh`, and open
+  http://localhost:5000 in your phone's browser. Use `termux-setup-storage` and
+  `--set data_dir=/sdcard/Download/ytdl-ui` if you want the temp files on shared storage.
+
+---
+
+## Recommended settings for a public instance
+
+```ini
+[server]
+trust_proxy = 1
+
+[security]
+admin_password = …
+# password = …                       # private instance
+rate_limit = 20
+download_rate_limit = 5
+# allowed_sites = youtube.com, youtu.be, music.youtube.com, soundcloud.com
+
+[limits]
+max_concurrent_jobs = 2
+max_jobs_per_client = 2
+max_duration_minutes = 180
+max_filesize_mb = 4096
+max_playlist_items = 50
+job_ttl_minutes = 20
+
+[processing]
+processing_mode = choice
+processing_default = auto           # capable devices process locally
+```
+
+For the lowest possible server load: `processing_mode = browser` and `fallback_to_server = false`.
+The server then never downloads or converts anything — it only resolves stream URLs and relays bytes
+for sites (like YouTube) that don't allow browsers to fetch them directly. Set `relay = false` as
+well if you only want sites the browser can fetch on its own.
+
+---
+
+## Maintenance
+
+| Task | Command |
 |---|---|
-| `yt-dlp: not found` | Ensure `/usr/local/bin/yt-dlp` exists and is executable |
-| `ffmpeg: not found` | Run `sudo apt install ffmpeg` (Linux) or `brew install ffmpeg` (macOS) |
-| Downloads fail silently | Check `sudo journalctl -u ytdlui -f` and retry |
-| Caddy returns 502 | `sudo systemctl status ytdlui` — Flask may have crashed |
-| HTTPS cert not issuing | Ports 80 and 443 must be open and the domain must resolve to your IP |
-| Playlist downloads time out | Playlist timeout is 2 hours; very large playlists may still exceed this |
+| Logs | `journalctl -u ytdlui -f` |
+| Restart | `sudo systemctl restart ytdlui` |
+| Update YTDL-UI + yt-dlp | `sudo /opt/ytdlui/update.sh` (or the admin panel) |
+| Update only yt-dlp | happens automatically; force it with `sudo -u ytdlui /opt/ytdlui/.venv/bin/python /opt/ytdlui/server.py --update-ytdlp` |
+| Versions | `sudo -u ytdlui /opt/ytdlui/.venv/bin/python /opt/ytdlui/server.py --version` |
+| Effective settings | `… server.py --print-config` |
+| Uninstall | `sudo systemctl disable --now ytdlui && sudo rm -rf /opt/ytdlui /etc/systemd/system/ytdlui.service && sudo userdel ytdlui` |
 
----
-
-## File layout (production)
-
-```
-/srv/ytdlui/
-├── server.py
-├── index.html
-├── venv/
-└── .tmp/         ← auto-created, auto-cleaned after 120s
-```
+Temporary files live in `/opt/ytdlui/data/tmp` and are deleted `job_ttl_minutes` after each download
+finishes (and whenever the service starts). Nothing else needs cleaning up.

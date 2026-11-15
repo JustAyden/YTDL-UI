@@ -1,0 +1,872 @@
+import { BrowserEngine, browserCapable, prefersBrowser, saveBlob } from "./engine.js";
+import { buildZip } from "./zip.js";
+
+// ── tiny helpers ────────────────────────────────────────────────────────
+const $ = (id) => document.getElementById(id);
+const h = (tag, attrs = {}, ...kids) => {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k === "class") el.className = v;
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else if (k === "text") el.textContent = v;
+    else el.setAttribute(k, v === true ? "" : v);
+  }
+  for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid.nodeType ? kid : String(kid));
+  return el;
+};
+const store = {
+  get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private mode */ } },
+};
+const fmtBytes = (n) => {
+  if (n == null || !isFinite(n)) return "";
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (n >= 1000 && i < u.length - 1) { n /= 1000; i++; }
+  return `${n >= 100 || i === 0 ? Math.round(n) : n.toFixed(1)} ${u[i]}`;
+};
+const fmtEta = (s) => {
+  if (s == null || !isFinite(s) || s < 0) return "";
+  s = Math.round(s);
+  const m = Math.floor(s / 60), r = s % 60;
+  return m >= 60 ? `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}:${String(r).padStart(2, "0")}` : `${m}:${String(r).padStart(2, "0")}`;
+};
+const safeName = (s) => (s || "download").replace(/[\\/:*?"<>|\x00-\x1f]/g, "").replace(/\s+/g, " ").trim().slice(0, 150) || "download";
+
+async function api(path, { method = "GET", body, signal } = {}) {
+  const res = await fetch(path, {
+    method, signal, credentials: "same-origin",
+    headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  let data = {};
+  try { data = await res.json(); } catch { /* not json */ }
+  if (res.status === 401 && data.login) { location.reload(); }
+  if (!res.ok) {
+    const err = new Error(data.error || `Server error (${res.status})`);
+    err.status = res.status; err.data = data;
+    throw err;
+  }
+  return data;
+}
+
+function alertBox(el, type, text, spinner = false) {
+  el.replaceChildren(h("div", { class: `alert alert-${type}`, role: type === "error" ? "alert" : null },
+    spinner ? h("span", { class: "spinner" }) : null, h("span", { text })));
+}
+const clear = (el) => el.replaceChildren();
+
+// ── state ───────────────────────────────────────────────────────────────
+let CONFIG;
+let engine;
+const prefs = store.get("ytdlui.prefs", {});
+const S = {
+  url: "", info: null, noPlaylist: false,
+  kind: prefs.kind || "video", format: null, quality: null,
+  embed: null, zip: prefs.zip ?? true, processing: "server",
+  selected: new Set(),
+};
+const jobs = new Map();      // id → job view-model
+let pollTimer = null;
+
+function savePrefs() {
+  Object.assign(prefs, {
+    kind: S.kind, zip: S.zip, processing: S.processing,
+    [`format_${S.kind}`]: S.format, [`quality_${S.kind}`]: S.quality, [`embed_${S.kind}`]: S.embed,
+  });
+  store.set("ytdlui.prefs", prefs);
+}
+
+// ── processing location ─────────────────────────────────────────────────
+function procAvailability() {
+  const mode = CONFIG.processing.mode;
+  const canBrowser = mode !== "server" && browserCapable();
+  const canServer = CONFIG.server_downloads;
+  return { canBrowser, canServer, choice: mode === "choice" && canBrowser && canServer };
+}
+
+function initialProcessing() {
+  const { canBrowser, canServer, choice } = procAvailability();
+  if (!canBrowser) return "server";
+  if (!canServer || CONFIG.processing.mode === "browser") return "browser";
+  if (choice && (prefs.processing === "server" || prefs.processing === "browser")) return prefs.processing;
+  const d = CONFIG.processing.default;
+  if (d === "auto") return prefersBrowser() ? "browser" : "server";
+  return d === "browser" ? "browser" : "server";
+}
+
+function renderProcessing() {
+  const { canBrowser, canServer, choice } = procAvailability();
+  $("proc-row").classList.toggle("hidden", !choice);
+  const fixed = $("proc-fixed");
+  fixed.classList.add("hidden");
+  if (choice) {
+    document.querySelectorAll("[data-proc]").forEach((b) => {
+      const on = b.dataset.proc === S.processing;
+      b.classList.toggle("active", on);
+      b.setAttribute("aria-checked", on);
+    });
+    const busy = CONFIG.load?.busy;
+    $("proc-note").textContent = S.processing === "browser"
+      ? "Your device downloads and converts the file — easier on the server. The first time loads a ~31 MB converter."
+      : busy ? "The server is busy right now — “This device” may be faster."
+        : "The server downloads and converts the file for you.";
+  } else if (CONFIG.processing.mode === "browser" && canBrowser) {
+    fixed.textContent = "Files are processed on your device — this server only looks up the streams.";
+    fixed.classList.remove("hidden");
+  } else if (CONFIG.processing.mode === "browser" && !canBrowser && canServer) {
+    fixed.textContent = "Your browser can't convert files itself, so the server will do it.";
+    fixed.classList.remove("hidden");
+  } else if (!canServer && !canBrowser) {
+    fixed.textContent = "This browser can't process downloads, and the server only allows in-browser processing.";
+    fixed.classList.remove("hidden");
+  }
+}
+
+// ── fetch info ──────────────────────────────────────────────────────────
+function extractUrl(text) {
+  const m = (text || "").match(/https?:\/\/[^\s<>"']+/i);
+  return m ? m[0] : (text || "").trim();
+}
+
+async function fetchInfo(noPlaylist = false) {
+  const url = extractUrl($("url-input").value);
+  const alert = $("fetch-alert");
+  if (!url) { alertBox(alert, "warn", "Paste a link first."); return; }
+  $("url-input").value = url;
+  S.url = url;
+  S.noPlaylist = noPlaylist;
+  $("fetch-btn").disabled = true;
+  $("info-card").classList.add("hidden");
+  $("dl-panel").classList.add("hidden");
+  clear($("dl-alert"));
+  alertBox(alert, "info", "Looking up the link…", true);
+  try {
+    const info = await api("api/info", { method: "POST", body: { url, no_playlist: noPlaylist } });
+    S.info = info;
+    clear(alert);
+    renderInfo();
+    renderOptions();
+    $("info-card").classList.remove("hidden");
+    $("dl-panel").classList.remove("hidden");
+  } catch (e) {
+    alertBox(alert, "error", e.message === "Failed to fetch" ? "Couldn't reach the server. Is it running?" : e.message);
+  } finally {
+    $("fetch-btn").disabled = false;
+  }
+}
+
+function renderInfo() {
+  const i = S.info;
+  const img = $("thumb");
+  img.parentElement.classList.toggle("hidden", !i.thumbnail);
+  if (i.thumbnail) img.src = i.thumbnail; else img.removeAttribute("src");
+  $("info-title").textContent = i.title;
+  $("info-detail").textContent = [i.uploader, i.duration_str, i.extractor].filter(Boolean).join("  ·  ");
+  const pills = $("info-pills");
+  clear(pills);
+  if (i.type === "playlist") {
+    pills.append(h("span", { class: "pill", text: `${i.count} item${i.count === 1 ? "" : "s"}` }));
+    if (i.single_available) {
+      pills.append(h("button", { class: "pill", type: "button", style: "cursor:pointer", text: "Just this video →",
+        onclick: () => fetchInfo(true) }));
+    }
+  } else if (S.noPlaylist) {
+    pills.append(h("button", { class: "pill", type: "button", style: "cursor:pointer", text: "← Whole playlist",
+      onclick: () => fetchInfo(false) }));
+  }
+  if (i.is_live) pills.append(h("span", { class: "pill pill-warn", text: "live" }));
+  if (i.too_long) pills.append(h("span", { class: "pill pill-warn", text: `over the ${i.max_duration_minutes} min limit` }));
+}
+
+// ── options ─────────────────────────────────────────────────────────────
+function renderOptions() {
+  const i = S.info;
+  const canVideo = i.has_video !== false;
+  if (!canVideo) S.kind = "audio";
+  $("tab-video").disabled = !canVideo;
+  setKind(S.kind, false);
+
+  const isPl = i.type === "playlist";
+  $("playlist-wrap").classList.toggle("hidden", !isPl);
+  if (isPl) {
+    S.selected = new Set(i.entries.filter((e) => !e.too_long).slice(0, i.max_items).map((e) => e.index));
+    renderPlaylist();
+  }
+  renderProcessing();
+  renderZipRow();
+  updateDownloadButton();
+}
+
+function setKind(kind, save = true) {
+  S.kind = kind;
+  $("tab-video").classList.toggle("active", kind === "video");
+  $("tab-audio").classList.toggle("active", kind === "audio");
+  $("tab-video").setAttribute("aria-selected", kind === "video");
+  $("tab-audio").setAttribute("aria-selected", kind === "audio");
+  const list = CONFIG.formats[kind];
+  const pref = prefs[`format_${kind}`];
+  S.format = list.some((f) => f.id === pref) ? pref : list[0].id;
+  const embedPref = prefs[`embed_${kind}`];
+  S.embed = typeof embedPref === "boolean" ? embedPref : kind === "audio";
+  $("embed-toggle").checked = S.embed;
+  renderFormats();
+  if (save) savePrefs();
+}
+
+function renderFormats() {
+  const row = $("format-chips");
+  clear(row);
+  for (const f of CONFIG.formats[S.kind]) {
+    row.append(h("button", {
+      type: "button", class: "chip" + (f.id === S.format ? " selected" : ""), role: "radio",
+      "aria-checked": f.id === S.format, title: f.note, text: f.label,
+      onclick: () => { S.format = f.id; renderFormats(); savePrefs(); },
+    }));
+  }
+  $("format-note").textContent = CONFIG.formats[S.kind].find((f) => f.id === S.format)?.note || "";
+  renderQualities();
+  updateEmbedNote();
+}
+
+function renderQualities() {
+  const wrap = $("quality-wrap");
+  const row = $("quality-chips");
+  clear(row);
+  if (S.kind === "audio") {
+    const fmt = CONFIG.formats.audio.find((f) => f.id === S.format);
+    if (!fmt.lossy) { wrap.classList.add("hidden"); S.quality = null; return; }
+    wrap.classList.remove("hidden");
+    $("quality-label").textContent = "Bitrate";
+    const pref = Number(String(prefs.quality_audio || "").replace("k", ""));
+    const br = CONFIG.bitrates.includes(pref) ? pref : CONFIG.default_bitrate;
+    S.quality = `${br}k`;
+    for (const b of CONFIG.bitrates) {
+      row.append(h("button", {
+        type: "button", class: "chip" + (`${b}k` === S.quality ? " selected" : ""), role: "radio",
+        "aria-checked": `${b}k` === S.quality, text: `${b}k`,
+        onclick: () => { S.quality = `${b}k`; renderQualitySel(); savePrefs(); },
+      }));
+    }
+    return;
+  }
+  wrap.classList.remove("hidden");
+  $("quality-label").textContent = "Quality";
+  const qs = [{ label: "best", height: null, size: null }, ...(S.info.video_qualities || [])];
+  const pref = prefs.quality_video;
+  S.quality = qs.some((q) => q.label === pref) ? pref : (qs[1]?.label || "best");
+  for (const q of qs) {
+    const label = q.label === "best" ? "Best" : q.label;
+    row.append(h("button", {
+      type: "button", class: "chip" + (q.label === S.quality ? " selected" : ""), role: "radio",
+      "aria-checked": q.label === S.quality, "data-q": q.label,
+      onclick: () => { S.quality = q.label; renderQualitySel(); savePrefs(); },
+    }, label, q.size ? h("small", { text: `≈ ${fmtBytes(q.size)}` }) : null));
+  }
+}
+
+function renderQualitySel() {
+  document.querySelectorAll("#quality-chips .chip").forEach((b) => {
+    const on = (b.dataset.q || b.textContent) === S.quality;
+    b.classList.toggle("selected", on);
+    b.setAttribute("aria-checked", on);
+  });
+  updateDownloadButton();
+}
+
+function updateEmbedNote() {
+  const note = S.kind === "audio"
+    ? (["mp3", "m4a", "flac", "opus"].includes(S.format) ? "Title, artist and cover art inside the file" : "Title and artist tags")
+    : "Title and channel tags" + (["mp4", "mkv"].includes(S.format) ? " plus thumbnail" : "");
+  $("embed-note").textContent = note;
+  updateDownloadButton();
+}
+
+function renderPlaylist() {
+  const list = $("pl-list");
+  clear(list);
+  const max = S.info.max_items;
+  for (const e of S.info.entries) {
+    const disabled = e.too_long;
+    const cb = h("input", { type: "checkbox", checked: S.selected.has(e.index), disabled,
+      "aria-label": e.title });
+    cb.addEventListener("change", () => {
+      if (cb.checked) {
+        if (S.selected.size >= max) { cb.checked = false; alertBox($("dl-alert"), "warn", `This server allows at most ${max} items per download.`); return; }
+        S.selected.add(e.index);
+      } else S.selected.delete(e.index);
+      updatePlaylistCount();
+    });
+    list.append(h("label", { class: "pl-item" + (disabled ? " disabled" : ""), title: disabled ? "Longer than this server allows" : e.title },
+      cb, h("span", { class: "pl-idx", text: e.index }), h("span", { class: "pl-title", text: e.title }),
+      h("span", { class: "pl-dur", text: e.duration_str || "" })));
+  }
+  updatePlaylistCount();
+}
+
+function updatePlaylistCount() {
+  const n = S.info.entries.length;
+  $("pl-count").textContent = `${S.selected.size} of ${n} selected`;
+  updateDownloadButton();
+}
+
+function renderZipRow() {
+  const isPl = S.info?.type === "playlist";
+  $("zip-row").classList.toggle("hidden", !(isPl && S.processing === "browser"));
+  $("zip-toggle").checked = S.zip;
+}
+
+function updateDownloadButton() {
+  const btn = $("dl-btn");
+  if (!S.info) return;
+  const fmt = (S.format || "").toUpperCase();
+  if (S.info.type === "playlist") {
+    const n = S.selected.size;
+    btn.textContent = n ? `Download ${n} item${n === 1 ? "" : "s"} · ${fmt}` : "Select items to download";
+    btn.disabled = n === 0;
+  } else {
+    const q = S.quality ? (S.quality === "best" ? "best quality" : S.quality) : "";
+    btn.textContent = `Download ${fmt}${q ? " · " + q : ""}`;
+    btn.disabled = !!S.info.too_long;
+  }
+}
+
+// ── jobs: shared view ───────────────────────────────────────────────────
+function persistServerJobs() {
+  const list = [...jobs.values()].filter((j) => j.mode === "server" && j.status !== "removed")
+    .map(({ id, title, thumb, kind, format, quality, playlist, saved, created, note }) =>
+      ({ id, title, thumb, kind, format, quality, playlist, saved, created, note }));
+  store.set("ytdlui.jobs", list.slice(0, 30));
+}
+
+function addJob(j) {
+  j.created ??= Date.now();
+  j.status ??= "queued";
+  j.progress ??= 0;
+  j.files ??= [];
+  jobs.set(j.id, j);
+  buildJobCard(j);
+  renderJob(j);
+  $("jobs-title").classList.remove("hidden");
+  if (j.mode === "server") persistServerJobs();
+  return j;
+}
+
+function buildJobCard(j) {
+  const bar = h("div");
+  j.el = {
+    root: h("article", { class: "job" }),
+    title: h("div", { class: "job-title" }),
+    tags: h("div", { class: "job-tags" }),
+    bar: h("div", { class: "bar" }, bar), fill: bar,
+    st: h("span", { class: "st" }),
+    actions: h("div", { class: "job-actions" }),
+    files: h("div", { class: "job-files hidden" }),
+    note: h("div", { class: "job-note hidden" }),
+  };
+  const x = h("button", { class: "job-x", type: "button", "aria-label": "Remove", title: "Cancel / remove", text: "×",
+    onclick: () => removeJob(j) });
+  const thumb = h("div", { class: "job-thumb" }, j.thumb ? h("img", { src: j.thumb, alt: "", referrerpolicy: "no-referrer", loading: "lazy" }) : null);
+  j.el.root.append(thumb, h("div", { class: "job-body" },
+    h("div", { class: "job-top" }, j.el.title, x), j.el.tags, j.el.bar,
+    h("div", { class: "job-status" }, j.el.st, j.el.actions), j.el.note, j.el.files));
+  $("jobs").prepend(j.el.root);
+}
+
+function renderJob(j) {
+  const e = j.el;
+  if (!e) return;
+  e.root.className = `job ${j.status}`;
+  e.title.textContent = j.title || "Download";
+  e.title.title = j.title || "";
+  e.tags.replaceChildren(...[
+    h("span", { class: "tag", text: (j.format || "").toUpperCase() }),
+    j.quality ? h("span", { class: "tag", text: j.quality }) : null,
+    j.playlist ? h("span", { class: "tag", text: j.item_count ? `${j.item_count} items` : "playlist" }) : null,
+    h("span", { class: "tag" + (j.mode === "browser" ? " tag-device" : ""), text: j.mode === "browser" ? "this device" : "server" }),
+  ].filter(Boolean));
+  const active = j.status === "queued" || j.status === "running";
+  const p = j.progress;
+  e.bar.classList.toggle("indeterminate", active && (p == null || (j.status === "queued")));
+  e.fill.style.width = `${Math.round((j.status === "done" ? 1 : p || 0) * 100)}%`;
+
+  let text = "";
+  if (j.status === "queued") text = j.queue_position ? `Waiting in queue (#${j.queue_position})` : (j.stage || "Starting…");
+  else if (j.status === "running") {
+    const bits = [j.stage || "Working"];
+    if (p != null) bits.push(`${Math.round(p * 100)}%`);
+    if (j.speed) bits.push(`${fmtBytes(j.speed)}/s`);
+    if (j.eta) bits.push(`${fmtEta(j.eta)} left`);
+    text = bits.join(" · ");
+  } else if (j.status === "done") {
+    const size = j.files.reduce((n, f) => n + (f.size || 0), 0);
+    text = (j.stage && j.stage !== "Ready" ? j.stage : "Done") + (size ? ` · ${fmtBytes(size)}` : "");
+  } else if (j.status === "error") text = j.error || "Failed";
+  else if (j.status === "cancelled") text = "Cancelled";
+  else if (j.status === "expired") text = "Expired — the server deleted this file";
+  e.st.textContent = text;
+  e.st.title = text;
+
+  e.actions.replaceChildren();
+  if (active) {
+    e.actions.append(h("button", { class: "btn btn-danger btn-small", type: "button", text: "Cancel", onclick: () => cancelJob(j) }));
+  } else if (j.status === "done") {
+    if (j.mode === "server" || j.blob) {
+      e.actions.append(h("button", { class: "btn btn-secondary btn-small", type: "button",
+        text: j.saved ? "Save again" : "Save", onclick: () => saveJob(j) }));
+    }
+  } else if (j.status === "error" || j.status === "cancelled") {
+    if (j.retry) e.actions.append(h("button", { class: "btn btn-secondary btn-small", type: "button", text: "Retry", onclick: () => { removeJob(j); j.retry(); } }));
+  }
+
+  e.note.classList.toggle("hidden", !j.note);
+  e.note.textContent = j.note || "";
+
+  const showFiles = j.status === "done" && j.mode === "server" && j.files.length > 1;
+  e.files.classList.toggle("hidden", !showFiles);
+  if (showFiles && e.files.childElementCount !== j.files.length) {
+    e.files.replaceChildren(...j.files.map((f) => h("a", { href: `api/jobs/${j.id}/files/${f.index}`, download: f.name },
+      h("span", { text: f.name }), h("span", { class: "mono", text: fmtBytes(f.size) }))));
+  }
+}
+
+function removeJob(j) {
+  if (j.status === "queued" || j.status === "running") cancelJob(j);
+  if (j.mode === "server") api(`api/jobs/${j.id}`, { method: "DELETE" }).catch(() => {});
+  j.el?.root.remove();
+  j.blob = null;
+  jobs.delete(j.id);
+  persistServerJobs();
+  $("jobs-title").classList.toggle("hidden", jobs.size === 0);
+}
+
+function cancelJob(j) {
+  if (j.mode === "browser") { j.abort?.(); return; }
+  api(`api/jobs/${j.id}`, { method: "DELETE" }).catch(() => {});
+  j.status = "cancelled";
+  renderJob(j);
+}
+
+function triggerUrlDownload(url) {
+  const a = h("a", { href: url, download: "" });
+  a.style.display = "none";
+  document.body.append(a);
+  a.click();
+  a.remove();
+}
+
+function saveJob(j) {
+  if (j.mode === "browser" && j.blob) saveBlob(j.blob, j.filename);
+  else if (j.mode === "server") triggerUrlDownload(`api/jobs/${j.id}/file`);
+  j.saved = true;
+  renderJob(j);
+  persistServerJobs();
+}
+
+// ── server jobs ─────────────────────────────────────────────────────────
+async function startServerJob(req, view, note) {
+  const data = await api("api/jobs", { method: "POST", body: req });
+  const j = addJob({ ...view, mode: "server", id: data.id, note });
+  applyServerState(j, data);
+  j.retry = () => startServerJob(req, view).catch((e) => alertBox($("dl-alert"), "error", e.message));
+  schedulePoll();
+  return j;
+}
+
+function applyServerState(j, d) {
+  const wasDone = j.status === "done";
+  Object.assign(j, {
+    status: d.status, progress: d.progress, stage: d.stage, speed: d.speed, eta: d.eta, error: d.error,
+    files: d.files || [], queue_position: d.queue_position, item_count: d.item_count || j.item_count,
+  });
+  if (!j.title && d.title) j.title = d.title;
+  if (d.status === "done" && !wasDone && !j.saved) {
+    saveJob(j);
+  }
+  if (d.skipped && j.playlist && d.status === "done") j.note = `${d.skipped} item(s) couldn't be downloaded and were skipped.`;
+  renderJob(j);
+}
+
+function schedulePoll() {
+  if (pollTimer) return;
+  pollTimer = setTimeout(poll, 900);
+}
+
+async function poll() {
+  pollTimer = null;
+  const active = [...jobs.values()].filter((j) => j.mode === "server" && (j.status === "queued" || j.status === "running"));
+  const pending = [...jobs.values()].filter((j) => j.mode === "server" && j.status === "done");
+  const ids = [...active, ...pending].map((j) => j.id);
+  if (!ids.length) return;
+  try {
+    const data = await api(`api/jobs?ids=${ids.join(",")}`);
+    if (data.load) { CONFIG.load = { ...CONFIG.load, ...data.load }; }
+    const seen = new Set(data.jobs.map((d) => d.id));
+    for (const d of data.jobs) { const j = jobs.get(d.id); if (j) applyServerState(j, d); }
+    for (const j of [...active, ...pending]) {
+      if (!seen.has(j.id)) { j.status = j.status === "done" ? "expired" : "error"; if (j.status === "error") j.error = "The server lost track of this download (it may have restarted)."; renderJob(j); }
+    }
+    persistServerJobs();
+  } catch { /* transient — try again */ }
+  if ([...jobs.values()].some((j) => j.mode === "server" && (j.status === "queued" || j.status === "running"))) {
+    schedulePoll();
+  } else if ([...jobs.values()].some((j) => j.mode === "server" && j.status === "done")) {
+    pollTimer = setTimeout(poll, 30_000);   // notice expiry eventually
+  }
+}
+
+async function restoreServerJobs() {
+  const saved = store.get("ytdlui.jobs", []);
+  if (!saved.length) return;
+  let data;
+  try { data = await api(`api/jobs?ids=${saved.map((j) => j.id).join(",")}`); } catch { return; }
+  const live = new Map(data.jobs.map((d) => [d.id, d]));
+  for (const s of saved.reverse()) {
+    const d = live.get(s.id);
+    if (!d) continue;
+    const j = addJob({ ...s, mode: "server", saved: s.saved ?? true });
+    applyServerState(j, d);
+  }
+  persistServerJobs();
+  schedulePoll();
+}
+
+// ── browser jobs ────────────────────────────────────────────────────────
+let browserSeq = 0;
+
+function startBrowserJob(req, view, info) {
+  const ac = new AbortController();
+  const j = addJob({ ...view, mode: "browser", id: `b${++browserSeq}`, status: "queued", stage: "Waiting for the converter", progress: null });
+  j.abort = () => ac.abort();
+  j.retry = () => startBrowserJob(req, view, info);
+  const set = (patch) => { Object.assign(j, patch); renderJob(j); };
+
+  engine.enqueue(async () => {
+    if (ac.signal.aborted) throw Object.assign(new Error("Cancelled"), { cancelled: true });
+    set({ status: "running", stage: "Looking up streams", progress: null });
+    if (!req.playlist) {
+      const plan = await engine.resolve(req, ac.signal);
+      const blob = await engine.process(plan, { signal: ac.signal, onState: set });
+      j.blob = blob;
+      j.filename = plan.filename;
+      saveBlob(blob, plan.filename);
+      set({ status: "done", progress: 1, stage: "Done", files: [{ name: plan.filename, size: blob.size }], saved: true, speed: null, eta: null });
+      return;
+    }
+    const entries = info.entries.filter((e) => req.items.includes(e.index));
+    if (entries.some((e) => !e.url)) throw Object.assign(new Error("This playlist can't be processed in the browser."), { fallback: true });
+    const outputs = [];
+    let skipped = 0;
+    j.item_count = entries.length;
+    for (let k = 0; k < entries.length; k++) {
+      const e = entries[k];
+      const scale = (p) => (k + (p ?? 0)) / entries.length;
+      set({ stage: `Item ${k + 1} of ${entries.length} · looking up`, progress: scale(0) });
+      try {
+        const plan = await engine.resolve({ ...req, url: e.url, playlist: false, items: [] }, ac.signal);
+        const blob = await engine.process(plan, {
+          signal: ac.signal,
+          onState: (s) => set({ ...s, stage: `Item ${k + 1} of ${entries.length} · ${s.stage}`, progress: scale(s.progress) }),
+        });
+        const name = `${String(e.index).padStart(3, "0")} - ${plan.filename}`;
+        if (req.zip) outputs.push({ name, blob });
+        else saveBlob(blob, name);
+        j.files.push({ name, size: blob.size });
+      } catch (err) {
+        if (ac.signal.aborted || err.cancelled) throw err;
+        skipped++;
+        set({ note: `${skipped} item(s) skipped — last error: ${err.message}` });
+      }
+    }
+    if (!j.files.length) throw new Error("None of the items could be downloaded.");
+    if (outputs.length) {
+      set({ stage: "Building ZIP", progress: 0.99, speed: null, eta: null });
+      const zip = await buildZip(outputs);
+      j.blob = zip;
+      j.filename = `${safeName(info.title)}.zip`;
+      saveBlob(zip, j.filename);
+    }
+    set({ status: "done", progress: 1, stage: skipped ? `Done — ${skipped} skipped` : "Done", saved: true, speed: null, eta: null });
+  }).catch(async (err) => {
+    if (ac.signal.aborted || err.cancelled) { set({ status: "cancelled" }); return; }
+    const { canServer } = procAvailability();
+    if (err.fallback && canServer && CONFIG.processing.fallback) {
+      removeJob(j);
+      try {
+        await startServerJob(req, view, `Processed on the server instead: ${err.message}`);
+      } catch (e2) {
+        alertBox($("dl-alert"), "error", e2.message);
+      }
+      return;
+    }
+    set({ status: "error", error: err.message, speed: null, eta: null });
+  });
+  return j;
+}
+
+window.addEventListener("beforeunload", (e) => {
+  if ([...jobs.values()].some((j) => j.mode === "browser" && (j.status === "running" || j.status === "queued"))) {
+    e.preventDefault();
+    e.returnValue = "";
+  }
+});
+
+// ── download button ─────────────────────────────────────────────────────
+async function startDownload() {
+  if (!S.info) return;
+  const i = S.info;
+  const isPl = i.type === "playlist";
+  const req = {
+    url: S.url, kind: S.kind, format: S.format, quality: S.quality || "", embed: S.embed,
+    playlist: isPl, items: isPl ? [...S.selected].sort((a, b) => a - b) : [], title: i.title,
+    zip: S.zip,
+  };
+  if (!isPl && S.noPlaylist) req.playlist = false;
+  const view = {
+    title: i.title, thumb: i.thumbnail, kind: S.kind, format: S.format, playlist: isPl,
+    quality: S.kind === "audio" ? (S.quality || "lossless") : (S.quality === "best" ? "best" : S.quality),
+    item_count: isPl ? req.items.length : 0,
+  };
+  clear($("dl-alert"));
+  const btn = $("dl-btn");
+  btn.disabled = true;
+  try {
+    if (S.processing === "browser") startBrowserJob(req, view, i);
+    else await startServerJob(req, view);
+    $("jobs-title").scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch (e) {
+    alertBox($("dl-alert"), "error", e.message);
+  } finally {
+    setTimeout(() => { btn.disabled = false; updateDownloadButton(); }, 600);
+  }
+}
+
+// ── admin ───────────────────────────────────────────────────────────────
+async function openAdmin() {
+  const dlg = $("admin-modal");
+  if (!dlg.open) dlg.showModal();
+  if (!CONFIG.auth.admin) {
+    $("admin-login").classList.remove("hidden");
+    $("admin-panel").classList.add("hidden");
+    setTimeout(() => $("admin-pass").focus(), 50);
+    return;
+  }
+  $("admin-login").classList.add("hidden");
+  const panel = $("admin-panel");
+  panel.classList.remove("hidden");
+  if (!panel.childElementCount) panel.append(h("p", {}, h("span", { class: "spinner" }), "  Loading…"));
+  try {
+    const [st, jl] = await Promise.all([api("api/admin/status"), api("api/admin/jobs")]);
+    renderAdmin(st, jl.jobs);
+  } catch (e) {
+    panel.replaceChildren(h("div", { class: "alert alert-error", text: e.message }));
+  }
+}
+
+function adminAction(label, path, { confirmText, body, cls = "btn-secondary", after } = {}) {
+  return h("button", {
+    class: `btn btn-small ${cls}`, type: "button", text: label,
+    onclick: async (ev) => {
+      if (confirmText && !confirm(confirmText)) return;
+      const b = ev.currentTarget;
+      b.disabled = true;
+      const old = b.textContent;
+      b.textContent = "Working…";
+      const msg = $("admin-msg");
+      try {
+        let r;
+        try { r = await api(path, { method: "POST", body: body || {} }); }
+        catch (e) {
+          if (e.status === 409 && confirm(`${e.message}\n\nForce it anyway?`)) r = await api(path, { method: "POST", body: { ...(body || {}), force: true } });
+          else throw e;
+        }
+        alertBox(msg, r.ok === false ? "error" : "success", r.message || (r.removed != null ? `Removed ${r.removed} finished download(s).` : "Done."));
+        if (after) after(r);
+        else setTimeout(openAdmin, 400);
+      } catch (e) {
+        alertBox(msg, "error", e.message);
+      } finally {
+        b.disabled = false;
+        b.textContent = old;
+      }
+    },
+  });
+}
+
+function renderAdmin(st, jobList) {
+  const panel = $("admin-panel");
+  const app = st.app, yt = st.ytdlp;
+  const ago = (t) => t ? new Date(t * 1000).toLocaleString() : "never";
+  const row = (k, v, sub, action) => [h("div", { class: "k", text: k }), h("div", { class: "v" }, v, sub ? h("small", { text: sub }) : null), h("div", {}, action || "")];
+
+  const appLine = app.update_available ? `${app.current} → ${app.latest} available` : `${app.current}${app.latest ? " (latest)" : ""}`;
+  const appAction = app.update_available
+    ? (app.can_apply ? adminAction("Update", "api/admin/update-app", { cls: "btn-primary",
+        confirmText: `Install YTDL-UI ${app.latest} and restart the server?`,
+        after: (r) => { if (r.ok && r.restart) { alertBox($("admin-msg"), "info", "Restarting… the page will reload.", true); waitForRestart(); } } })
+      : h("a", { class: "btn btn-small btn-secondary", href: app.url || "#", target: "_blank", rel: "noopener", text: "Release notes" }))
+    : null;
+  const ytLine = `${yt.current || "not installed"}${yt.update_available ? ` → ${yt.latest}` : ""}`;
+  const ff = st.ffmpeg;
+
+  panel.replaceChildren(
+    h("div", { id: "admin-msg" }),
+    h("div", { class: "modal-section" },
+      h("div", { class: "modal-section-title", text: "Versions" }),
+      h("div", { class: "kv" },
+        row("YTDL-UI", appLine, `${app.method} install · checked ${ago(app.checked_at)}${app.error ? " · " + app.error : ""}`, appAction),
+        row("yt-dlp", ytLine, `${yt.kind} · updates via ${yt.method}${yt.auto ? " (automatic)" : ""}${yt.last_result ? " · " + yt.last_result : ""}`,
+          adminAction(yt.update_available ? "Update" : "Update now", "api/admin/update-ytdlp", { cls: yt.update_available ? "btn-primary" : "btn-secondary", body: { force: !yt.update_available } })),
+        row("ffmpeg", ff.version || (ff.install?.state === "running" ? "installing…" : "not found"), ff.path || (ff.install?.error || ""),
+          !ff.path && ff.installable ? adminAction("Install", "api/admin/install-ffmpeg") : null),
+        row("JS runtime", st.js_runtime.name || "none", st.js_runtime.path || "deno or node lets yt-dlp unlock YouTube's best formats"),
+      ),
+      h("div", { class: "btn-row", style: "margin-top:10px" }, adminAction("Check for updates", "api/admin/check-updates", { after: () => setTimeout(openAdmin, 200) })),
+      app.update_available && app.notes ? h("details", { style: "margin-top:10px;font-size:0.8rem" },
+        h("summary", { text: `What's new in ${app.latest}` }),
+        h("pre", { style: "white-space:pre-wrap;font-size:0.75rem;color:var(--text-muted);margin-top:6px", text: app.notes.slice(0, 2500) })) : null,
+    ),
+    h("div", { class: "modal-section" },
+      h("div", { class: "modal-section-title", text: "Server" }),
+      h("div", { class: "stat-grid" },
+        stat(st.jobs.running, "running"), stat(st.jobs.queued, "queued"), stat(st.jobs.completed_total, "completed"),
+        stat(fmtBytes(st.tmp_bytes) || "0 B", "temp files"), stat(st.disk ? fmtBytes(st.disk.free) : "?", "disk free"),
+        stat(fmtBytes(st.relay.bytes_total) || "0 B", "relayed"), stat(st.relay.active, "active relays"),
+        stat(fmtEta(st.uptime), "uptime")),
+      h("p", { style: "margin:10px 0 0;font-size:0.78rem" },
+        `Processing: ${st.processing.mode}` + (st.processing.mode === "choice" ? ` (default ${st.processing.default})` : "") +
+        ` · relay ${st.processing.relay ? "on" : "off"} · fallback ${st.processing.fallback ? "on" : "off"} · ffmpeg.wasm from ${st.processing.wasm}`),
+      h("p", { style: "margin:4px 0 0;font-size:0.75rem", class: "mono", text: `config: ${st.config_path || "(defaults)"} · data: ${st.data_path}` }),
+    ),
+    h("div", { class: "modal-section" },
+      h("div", { class: "modal-section-title", text: `Recent server downloads (${jobList.length})` }),
+      jobList.length ? h("div", { class: "admin-jobs" }, jobList.slice(0, 40).map((jj) => h("div", {},
+        h("span", { text: jj.status, style: `color:var(--${jj.status === "done" ? "green" : jj.status === "error" ? "red" : "text-muted"})` }),
+        h("span", { class: "t", text: jj.title || jj.host, title: `${jj.title} — ${jj.host} — ${jj.client}` }),
+        h("span", { text: jj.progress != null && jj.status === "running" ? `${Math.round(jj.progress * 100)}%` : jj.format }),
+        jj.status === "running" || jj.status === "queued" ? adminAction("×", `api/admin/jobs/${jj.id}/cancel`) : null,
+      ))) : h("p", { text: "None right now." }),
+    ),
+    h("div", { class: "btn-row" },
+      adminAction("Clear finished downloads", "api/admin/cleanup"),
+      adminAction("Restart server", "api/admin/restart", { confirmText: "Restart the server? Running downloads will be stopped.",
+        after: () => { alertBox($("admin-msg"), "info", "Restarting… the page will reload.", true); waitForRestart(); } }),
+      h("button", { class: "btn btn-small btn-secondary", type: "button", text: "Log out", onclick: async () => {
+        await api("api/admin/logout", { method: "POST" }).catch(() => {});
+        CONFIG.auth.admin = false;
+        $("admin-panel").replaceChildren();
+        $("admin-dot").classList.add("hidden");
+        openAdmin();
+      } }),
+    ),
+  );
+}
+
+function stat(value, label) { return h("div", { class: "stat" }, h("b", { text: value ?? "0" }), h("span", { text: label })); }
+
+async function waitForRestart() {
+  await new Promise((r) => setTimeout(r, 2500));
+  for (let i = 0; i < 40; i++) {
+    try { const r = await fetch("api/health", { cache: "no-store" }); if (r.ok) { location.reload(); return; } } catch { /* down */ }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+}
+
+// ── init ────────────────────────────────────────────────────────────────
+function bind() {
+  $("url-form").addEventListener("submit", (e) => { e.preventDefault(); fetchInfo(false); });
+  $("url-input").addEventListener("paste", () => setTimeout(() => {
+    if (/^\s*https?:\/\//i.test($("url-input").value) || /https?:\/\//i.test($("url-input").value)) fetchInfo(false);
+  }, 0));
+  const paste = $("paste-btn");
+  if (window.isSecureContext && navigator.clipboard?.readText) {
+    paste.addEventListener("click", async () => {
+      try {
+        const t = await navigator.clipboard.readText();
+        if (t) { $("url-input").value = extractUrl(t); fetchInfo(false); }
+      } catch { $("url-input").focus(); }
+    });
+  } else {
+    paste.classList.add("hidden");
+    $("url-input").style.paddingRight = "14px";
+  }
+  $("tab-video").addEventListener("click", () => { setKind("video"); updateDownloadButton(); });
+  $("tab-audio").addEventListener("click", () => { setKind("audio"); updateDownloadButton(); });
+  $("embed-toggle").addEventListener("change", (e) => { S.embed = e.target.checked; savePrefs(); });
+  $("zip-toggle").addEventListener("change", (e) => { S.zip = e.target.checked; savePrefs(); });
+  document.querySelectorAll("[data-proc]").forEach((b) => b.addEventListener("click", () => {
+    S.processing = b.dataset.proc;
+    savePrefs();
+    renderProcessing();
+    renderZipRow();
+  }));
+  $("pl-all").addEventListener("click", () => {
+    S.selected = new Set(S.info.entries.filter((e) => !e.too_long).slice(0, S.info.max_items).map((e) => e.index));
+    renderPlaylist();
+  });
+  $("pl-none").addEventListener("click", () => { S.selected.clear(); renderPlaylist(); });
+  $("dl-btn").addEventListener("click", startDownload);
+  $("clear-finished").addEventListener("click", () => {
+    for (const j of [...jobs.values()]) if (!["queued", "running"].includes(j.status)) removeJob(j);
+  });
+  $("open-sites").addEventListener("click", () => $("sites-modal").showModal());
+  $("open-admin").addEventListener("click", openAdmin);
+  $("admin-login").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    try {
+      await api("api/admin/login", { method: "POST", body: { password: $("admin-pass").value } });
+      $("admin-pass").value = "";
+      clear($("admin-login-alert"));
+      CONFIG = await api("api/config");
+      openAdmin();
+      updateAdminDot();
+    } catch (err) {
+      alertBox($("admin-login-alert"), "error", err.message);
+    }
+  });
+  for (const dlg of document.querySelectorAll("dialog.modal")) {
+    dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
+  }
+}
+
+function updateAdminDot() {
+  const u = CONFIG.update, y = CONFIG.ytdlp_update;
+  $("admin-dot").classList.toggle("hidden", !(u?.update_available || y?.update_available));
+  if (u?.update_available) $("open-admin").title = `Update available: ${u.latest}`;
+}
+
+async function init() {
+  bind();
+  try {
+    CONFIG = await api("api/config");
+  } catch (e) {
+    alertBox($("fetch-alert"), "error", "Couldn't reach the server. Is it running?");
+    return;
+  }
+  engine = new BrowserEngine(CONFIG);
+  S.processing = initialProcessing();
+  $("version-badge").textContent = `v${CONFIG.version}  ·  yt-dlp ${CONFIG.ytdlp_version || "missing"}`;
+  if (CONFIG.auth.admin_enabled) $("open-admin").classList.remove("hidden");
+  updateAdminDot();
+  if (CONFIG.limits.allowed_sites?.length) {
+    const p = $("sites-restricted");
+    p.textContent = `This server only allows: ${CONFIG.limits.allowed_sites.join(", ")}.`;
+    p.classList.remove("hidden");
+  }
+  if (!CONFIG.ytdlp_ok) alertBox($("fetch-alert"), "warn", "The server is still installing yt-dlp. Give it a minute.");
+
+  restoreServerJobs();
+
+  const params = new URLSearchParams(location.search);
+  const shared = params.get("url") || params.get("text");
+  if (shared) {
+    $("url-input").value = extractUrl(shared);
+    history.replaceState(null, "", location.pathname);
+    fetchInfo(false);
+  } else {
+    $("url-input").focus({ preventScroll: true });
+  }
+}
+
+init();

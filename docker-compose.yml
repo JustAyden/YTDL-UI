@@ -1,0 +1,24 @@
+# docker compose up -d   →   http://localhost:5000
+services:
+  ytdl-ui:
+    image: ghcr.io/justayden/ytdl-ui:latest
+    build: .
+    container_name: ytdl-ui
+    restart: unless-stopped
+    ports:
+      - "5000:5000"            # use "127.0.0.1:5000:5000" behind a reverse proxy
+    volumes:
+      - ytdlui-data:/app/data
+      # - ./config.ini:/app/config.ini:ro      # optional config file
+      # - ./cookies.txt:/app/cookies.txt:ro    # optional, see README › Troubleshooting
+    environment:
+      # Any setting from config.example.ini works as YTDLUI_<NAME>:
+      YTDLUI_PROCESSING_MODE: choice           # server | browser | choice
+      YTDLUI_PROCESSING_DEFAULT: server        # server | browser | auto
+      # YTDLUI_PASSWORD: change-me
+      # YTDLUI_ADMIN_PASSWORD: change-me-too
+      # YTDLUI_TRUST_PROXY: "1"
+      # YTDLUI_COOKIES_FILE: /app/cookies.txt
+
+volumes:
+  ytdlui-data:

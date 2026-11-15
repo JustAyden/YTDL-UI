@@ -1,8 +1,14 @@
 # YTDL-UI
 
-A clean, self-hosted web UI for downloading YouTube videos and audio — powered by [yt-dlp](https://github.com/yt-dlp/yt-dlp) and [ffmpeg](https://ffmpeg.org). No accounts, no tracking, no ads.
+A clean, self-hosted web UI for downloading video and audio from YouTube and 1,800+ other sites — powered by [yt-dlp](https://github.com/yt-dlp/yt-dlp) and [ffmpeg](https://ffmpeg.org). No accounts, no tracking, no ads.
 
-![Sample UI Image](https://github.com/JustAyden/YTDL-UI/blob/main/111.png?raw=true)
+[![CI](https://github.com/JustAyden/YTDL-UI/actions/workflows/ci.yml/badge.svg)](https://github.com/JustAyden/YTDL-UI/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/JustAyden/YTDL-UI?label=release)](https://github.com/JustAyden/YTDL-UI/releases/latest)
+
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/main-light.png">
+  <img alt="YTDL-UI showing a video's quality options and two downloads in progress" src="docs/screenshots/main-dark.png" width="760">
+</picture>
 
 > Made by [@JustAyden](https://github.com/JustAyden) & [@dash1101](https://github.com/dash1101)
 
@@ -10,139 +16,216 @@ A clean, self-hosted web UI for downloading YouTube videos and audio — powered
 
 ## Features
 
-- **Video formats** — MP4, WebM, MKV with resolution selection (1080p, 720p, 480p, …)
-- **Audio formats** — MP3, FLAC, WAV, AAC, Opus with bitrate selection
-- **Playlist support** — download an entire playlist as a numbered ZIP archive
-- **Zero frontend build step** — single `index.html`, no npm, no bundler
-- **Cross-platform** — bundles `yt-dlp.exe`/`ffmpeg.exe` on Windows; uses system PATH on Linux/macOS
+- **Video** — MP4, WebM or MKV at any available resolution (up to 4K/8K), with estimated file sizes
+- **Audio** — MP3, M4A, Opus, FLAC or WAV, with title/artist tags and cover art embedded
+- **Playlists & channels** — pick exactly which items you want, get them as one ZIP or one-by-one
+- **Real progress** — speed, ETA and stage (downloading / merging / converting) for every download, with cancel
+- **Process on the server *or* in the visitor's browser** — admins can move the heavy lifting onto users' devices ([how it works](#server-vs-browser-processing))
+- **Keeps itself up to date** — yt-dlp updates automatically; YTDL-UI checks GitHub for new releases ([details](#updates))
+- **Runs anywhere** — single-file apps for Windows, macOS and Linux (x64 + ARM), a Docker image, or plain Python
+- **Built for self-hosting** — optional password, admin panel, rate limits, queue limits, size/duration limits, site allow-list, SSRF protection, reverse-proxy aware
+- **Light & dark theme**, works on phones, installable as an app, and accepts links shared from other apps
+- **Zero frontend build step** — plain HTML/CSS/JS, no npm, no bundler
 
 ---
 
-## Quick Start
+## Get it
 
-### Prerequisites
+| You want… | Do this |
+|---|---|
+| **The easy way** (Windows, macOS, Linux) | Download the file for your system from [**Releases**](https://github.com/JustAyden/YTDL-UI/releases/latest) and run it. Your browser opens automatically. |
+| **Docker** | `docker run -d -p 5000:5000 -v ytdlui-data:/app/data ghcr.io/justayden/ytdl-ui` |
+| **A Linux server** | `git clone https://github.com/JustAyden/YTDL-UI && cd YTDL-UI && sudo sh install.sh` |
+| **To run from source** | `./start.sh` (Linux/macOS/BSD/Termux) or `start.bat` (Windows) |
 
-| Tool | Windows | Linux/macOS |
+Then open **http://localhost:5000**.
+
+### Supported platforms
+
+| Platform | Ready-made app | Docker | From source |
+|---|---|---|---|
+| Windows 10/11 (x64) | `ytdl-ui-windows-x64.exe` | ✓ (Docker Desktop) | `start.bat` |
+| Windows on ARM | `ytdl-ui-windows-arm64.exe` | | `start.bat` |
+| macOS — Apple Silicon | `ytdl-ui-macos-arm64` | ✓ | `start.command` / `start.sh` |
+| macOS — Intel | `ytdl-ui-macos-x64` | ✓ | `start.command` / `start.sh` |
+| Linux x64 | `ytdl-ui-linux-x64` | ✓ `amd64` | `start.sh` / `install.sh` |
+| Linux ARM64 (Raspberry Pi 4/5, ARM servers) | `ytdl-ui-linux-arm64` | ✓ `arm64` | `start.sh` / `install.sh` |
+| FreeBSD, 32-bit Raspberry Pi, other Unix | | | `start.sh` |
+| Android ([Termux](https://termux.dev)) | | | `pkg install python ffmpeg nodejs` then `./start.sh` |
+
+The ready-made apps bundle Python and yt-dlp. On first start they create `data/` (and read an optional `config.ini`) **next to the executable**. If ffmpeg is missing, the Windows and Linux apps download a static build into `data/bin/` automatically; on macOS run `brew install ffmpeg`.
+
+<details>
+<summary>First launch on macOS / Windows shows a warning</summary>
+
+The apps aren't code-signed, so:
+
+- **macOS:** right-click the file → **Open** → **Open**, or run `xattr -d com.apple.quarantine ytdl-ui-macos-arm64 && chmod +x ytdl-ui-macos-arm64`.
+- **Windows:** SmartScreen → **More info** → **Run anyway**.
+
+Every release lists SHA-256 checksums in `SHA256SUMS.txt` if you want to verify the download.
+</details>
+
+### Requirements for running from source
+
+- **Python 3.10+** — the start scripts create a private `.venv` and install everything else
+- **ffmpeg** — `apt install ffmpeg` / `brew install ffmpeg` / `pkg install ffmpeg`, or `python server.py --install-ffmpeg` (Windows/Linux)
+- **A JavaScript runtime** — [Deno](https://deno.land) (recommended) or Node.js. yt-dlp needs one to unlock YouTube's higher qualities; without it YouTube may only offer a few low-quality formats.
+
+---
+
+## Server vs. browser processing
+
+Downloading is two jobs: **fetching** the media streams, and **processing** them (merging video + audio, converting to MP3, embedding cover art). YTDL-UI can do the processing in either place:
+
+| | **Server** (default) | **This device** (browser) |
 |---|---|---|
-| Python 3.10+ | [python.org](https://python.org/downloads) | `apt install python3` / `brew install python` |
-| yt-dlp | bundled `.exe` | see below |
-| ffmpeg | bundled `.exe` | `apt install ffmpeg` / `brew install ffmpeg` |
+| Who runs ffmpeg | the server | the visitor's browser ([ffmpeg.wasm](https://github.com/ffmpegwasm/ffmpeg.wasm)) |
+| Server CPU | merging + audio encoding | **none** — the server only asks yt-dlp *which* streams to use |
+| Server disk | temp files until the user saves them | **none** |
+| Server bandwidth | downloads, then serves the file | streams bytes straight through when the site requires it (see below) — never stored |
+| Works for | everything yt-dlp supports | plain-file formats (most sites, including YouTube); HLS-only sites fall back to the server |
+| First use | instant | the browser loads a ~31 MB converter once (from jsDelivr by default) |
 
-**Linux/macOS — install yt-dlp:**
-```bash
-sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
-  -o /usr/local/bin/yt-dlp && sudo chmod a+rx /usr/local/bin/yt-dlp
-```
+**Being honest about bandwidth:** some sites — YouTube included — sign their media URLs for the IP address that looked them up and don't allow browsers to fetch them directly. For those, the server *relays* the bytes: it pipes them from the site to the browser as they arrive, without writing to disk or running ffmpeg. Sites that do allow it are fetched by the browser directly, with zero server traffic. A relay token only works for streams yt-dlp resolved on that server, so the relay can't be abused as an open proxy.
 
-### Install Python dependencies
+Admins choose the behaviour in `config.ini` (or with `YTDLUI_*` environment variables):
 
-```bash
-pip install -r requirements.txt
-```
-
-### Run
-
-**Windows:**
-```
-start.bat
-```
-or
-```
-python server.py
-```
-
-**Linux / macOS:**
-```bash
-chmod +x start.sh && ./start.sh
-```
-or
-```bash
-python3 server.py
+```ini
+[processing]
+# server  – everything on the server (classic behaviour)
+# browser – visitors' devices do the processing; the server only resolves streams
+# choice  – visitors get a "Process on: Server / This device" switch
+processing_mode = choice
+# initial choice in "choice" mode: server | browser | auto
+#   auto = use the browser when the device looks capable (not on a metered or 2G/3G connection)
+processing_default = auto
+# if the browser can't handle a link, quietly use the server instead
+fallback_to_server = true
+# to guarantee the server NEVER downloads files itself:
+#   processing_mode = browser  +  fallback_to_server = false
 ```
 
-Then open **http://localhost:5000** in your browser.
+![Playlist picker with browser processing selected](docs/screenshots/playlist.png)
 
 ---
 
-## CLI Flags
+## Updates
 
-| Flag | Default | Description |
+| What | How it updates |
+|---|---|
+| **yt-dlp** | Automatically, every 24 h, only while no downloads are running. Uses pip when yt-dlp lives in a virtual environment (source installs, Docker), otherwise downloads the official release binary into `data/bin/` after verifying its SHA-256. A missing yt-dlp is installed the same way. |
+| **YTDL-UI** | Checks [GitHub releases](https://github.com/JustAyden/YTDL-UI/releases) every 12 h and shows admins a dot on the ⚙ button and the release notes. Install it with any of: |
+
+- **Admin panel → Update** (requires `allow_web_update = true`; the server restarts itself)
+- `./update.sh` · `update.bat` · `python server.py --update` · `sudo /opt/ytdlui/update.sh` (systemd install)
+- **Ready-made apps** download the new executable, verify its checksum, swap themselves and restart
+- **Docker:** `docker compose pull && docker compose up -d`
+
+Git checkouts update with `git pull --ff-only`; extracted archives are updated in place while keeping your `config.ini` and `data/`.
+
+<img alt="Admin panel with versions, update buttons and server stats" src="docs/screenshots/admin.png" width="560">
+
+---
+
+## Configuration
+
+Copy [`config.example.ini`](config.example.ini) to `config.ini` — every setting is documented there. Any setting also works as an environment variable (`YTDLUI_PORT=8080`) or on the command line (`--set port=8080`). Precedence: command line › environment › `config.ini` › defaults.
+
+The ones you're most likely to want:
+
+| Setting | Default | What it does |
 |---|---|---|
-| `-p`, `--port` | `5000` | Port to run the server on |
-| `--host` | `127.0.0.1` | Address to bind to |
-
-**Examples:**
+| `host` / `port` | `127.0.0.1` / `5000` | Where to listen. `0.0.0.0` makes it reachable from your network. |
+| `password` | *(none)* | Ask visitors for a password before they can use the site. |
+| `admin_password` | *(none)* | Enables the admin panel (⚙ in the top bar). |
+| `trust_proxy` | `0` | Set to `1` behind Caddy/Nginx/cloudflared (or `cloudflare`) so rate limits see real client IPs. |
+| `processing_mode` | `choice` | `server`, `browser` or `choice` — see above. |
+| `max_concurrent_jobs` | `2` | Server downloads that run at once; the rest queue. |
+| `max_duration_minutes` / `max_filesize_mb` | `0` (off) | Refuse very long or very large downloads. |
+| `allowed_sites` | *(any)* | e.g. `youtube.com, youtu.be, soundcloud.com` |
+| `cookies_file` | *(none)* | A `cookies.txt` for age-restricted videos and YouTube's "confirm you're not a bot". |
+| `ytdlp_auto_update` | `true` | Keep yt-dlp current. |
 
 ```bash
-# Default — localhost only (safe for tunnel/proxy setups)
-python3 server.py
-
-# Local network access — accessible from other devices on your LAN
-python3 server.py --host 0.0.0.0
-
-# Custom port
-python3 server.py --port 8080
-
-# Both
-python3 server.py --host 0.0.0.0 --port 8080
+python server.py --help          # all command-line options
+python server.py --print-config  # the settings currently in effect
+python server.py --version       # versions of YTDL-UI, yt-dlp, ffmpeg and the JS runtime
 ```
-
-> **Note:** The default bind address is `127.0.0.1` (localhost only). If you're running YTDL-UI on a separate machine and want to access it from another device on your network, pass `--host 0.0.0.0`. If you're running it behind a reverse proxy or Cloudflare tunnel, keep the default.
 
 ---
 
-## Windows — Bundled Binaries
+## Hosting it for other people
 
-Place `yt-dlp.exe` and `ffmpeg.exe` in the same folder as `server.py`. The app detects them automatically.
-
-Download links:
-- **yt-dlp.exe** → [github.com/yt-dlp/yt-dlp/releases/latest](https://github.com/yt-dlp/yt-dlp/releases/latest)
-- **ffmpeg.exe** → [ffmpeg.org/download.html](https://ffmpeg.org/download.html) (get a Windows build from gyan.dev or BtbN)
+- Keep the default `host = 127.0.0.1` and put a reverse proxy or tunnel in front (Caddy, Nginx, [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)), then set `trust_proxy = 1`.
+- Downloads run as background jobs, so long playlists work fine behind proxies with short timeouts (Cloudflare's is 100 s).
+- Set `password` for a private instance, `admin_password` to manage it, and consider `processing_mode = browser` to keep CPU and disk usage near zero.
+- `sudo sh install.sh` sets up a hardened systemd service (dedicated user, read-only system, restricted syscalls). See **[SETUP.md](SETUP.md)** for a full Debian + Caddy walkthrough, Cloudflare Tunnel and Docker examples.
 
 ---
 
-## Server Deployment
+## Troubleshooting
 
-### Reverse proxy / Cloudflare tunnel
-
-YTDL-UI binds to `127.0.0.1` by default, making it safe to expose via a reverse proxy (Caddy, Nginx) or a [Cloudflare Zero Trust tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) without opening any ports directly. Point your proxy or tunnel at `http://127.0.0.1:5000`.
-
-See **[SETUP.md](SETUP.md)** for a full guide on running YTDL-UI behind Caddy on a Debian server with automatic HTTPS.
-
-### Running as a systemd service (Linux)
-
-For a hardened, always-on deployment that runs as an unprivileged user and restarts automatically:
-
-```bash
-sudo bash install-service.sh
-```
-
-This script:
-- Creates a dedicated `ytdlui` system user with no login shell
-- Installs the app to `/opt/ytdlui`
-- Installs and enables the `ytdlui` systemd service
-
-Useful commands after install:
-```bash
-journalctl -u ytdlui -f        # live logs
-systemctl restart ytdlui       # restart
-systemctl stop ytdlui          # stop
-```
+| Problem | Fix |
+|---|---|
+| *"YouTube is asking this server to prove it isn't a bot"* | Common on cloud/VPS IPs. Export cookies from a logged-in browser (ideally a throwaway account) as `cookies.txt` and set `cookies_file`. A residential connection or `proxy` setting also helps. |
+| Only low qualities show up for YouTube | Install [Deno](https://deno.land) (or Node.js) and restart — check with `python server.py --version`. |
+| Lots of downloads suddenly fail | yt-dlp is probably outdated: admin panel → **Update yt-dlp**, or `python server.py --update-ytdlp`. |
+| *"ffmpeg not found"* | Install ffmpeg, or run `python server.py --install-ffmpeg`. Not needed with `processing_mode = browser`. |
+| "This device" falls back to the server | The site only offers HLS/DASH streams, the file is over `browser_max_mb`, or the browser is very old. |
+| Port already in use | `--port 8080` |
+| Logs | Console window · `journalctl -u ytdlui -f` · `docker logs ytdl-ui` |
 
 ---
 
 ## API
 
-| Endpoint | Method | Body | Description |
+All endpoints take and return JSON.
+
+| Endpoint | Method | Body / params | Description |
 |---|---|---|---|
-| `/` | GET | — | Serves the web UI |
-| `/api/info` | POST | `{url}` | Returns video/playlist metadata |
-| `/api/download` | POST | `{url, format, quality}` | Downloads and streams a single file |
-| `/api/download-playlist` | POST | `{url, format, quality}` | Downloads playlist, returns ZIP |
-| `/api/clear-tmp` | POST | — | Manually clears the temp directory |
+| `/api/info` | POST | `{url, no_playlist?}` | Metadata, available qualities, playlist entries |
+| `/api/jobs` | POST | `{url, format, quality, playlist?, items?, embed?}` | Start a server download → `{id, …}` |
+| `/api/jobs?ids=a,b` | GET | | Status of several downloads |
+| `/api/jobs/<id>` | GET / DELETE | | Status, or cancel + delete |
+| `/api/jobs/<id>/file` | GET | | The finished file (a streamed ZIP for playlists) |
+| `/api/jobs/<id>/files/<n>` | GET | | One file of a playlist |
+| `/api/resolve` | POST | same as `/api/jobs` | Browser processing: stream plan + relay tokens |
+| `/api/download` | POST | `{url, format, quality}` | v1-compatible one-shot download (waits, then returns the file) |
+| `/api/download-playlist` | POST | `{url, format, quality}` | v1-compatible playlist ZIP |
+| `/api/config` · `/api/health` | GET | | Server capabilities · liveness |
+
+`format` is one of `mp4 webm mkv mp3 m4a opus flac wav`; `quality` is a height like `1080p`/`best` for video or a bitrate like `192k` for audio.
+
+```bash
+curl -X POST localhost:5000/api/download -H 'Content-Type: application/json' \
+     -d '{"url":"https://youtu.be/aqz-KE-bpKQ","format":"mp3","quality":"192k"}' -OJ
+```
+
+---
+
+## Development
+
+```bash
+python -m venv .venv && .venv/bin/pip install -r requirements.txt pytest
+.venv/bin/python -m pytest              # tests use a fake yt-dlp, no network needed
+.venv/bin/python server.py --port 5050  # run it
+```
+
+```
+server.py            entry point
+ytdlui/              config, jobs, browser relay, updater, yt-dlp wrapper, Flask routes
+static/              index.html, css/, js/ (app.js UI · engine.js browser processing · ffmpeg-worker.js)
+packaging/           PyInstaller spec, build + smoke-test scripts for the standalone apps
+tests/               pytest suite
+```
+
+**Releasing:** bump `__version__` in `ytdlui/__init__.py`, add a section to [`CHANGELOG.md`](CHANGELOG.md), then push a tag (`git tag v2.0.1 && git push --tags`). GitHub Actions builds and smoke-tests the apps for every platform, publishes them with checksums as a GitHub release — which is what running installs pick up as their update — and pushes the multi-arch Docker image to `ghcr.io`.
 
 ---
 
 ## License
 
-MIT — do whatever you want with it.
+[MIT](LICENSE) — do whatever you want with it.
+
+yt-dlp is [Unlicense](https://github.com/yt-dlp/yt-dlp/blob/master/LICENSE); ffmpeg and ffmpeg.wasm are LGPL/GPL and are downloaded from their upstream projects, not shipped in this repository. Only download content you have the right to.

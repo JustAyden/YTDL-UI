@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark light">
+  <meta name="robots" content="noindex">
+  <title>YTDL-UI — Sign in</title>
+  <link rel="icon" href="static/img/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="static/css/app.css?v=__VERSION__">
+  <script type="module" src="static/js/login.js?v=__VERSION__"></script>
+</head>
+<body>
+<main style="max-width:420px;padding-top:12vh">
+  <div class="hero">
+    <div class="badge">ytdl-ui</div>
+    <h1 style="font-size:2.2rem">Private server</h1>
+    <p class="hero-sub">Enter the password to continue.</p>
+  </div>
+  <form class="card" id="login-form">
+    <label class="sr-only" for="pw">Password</label>
+    <div class="field" style="margin:0">
+      <input type="password" id="pw" autocomplete="current-password" required autofocus>
+      <button class="btn btn-primary" type="submit">Enter</button>
+    </div>
+    <div id="login-alert" aria-live="polite"></div>
+  </form>
+</main>
+</body>
+</html>
