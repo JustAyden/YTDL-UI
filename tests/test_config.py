@@ -58,3 +58,14 @@ def test_example_config_covers_every_field():
     text = render_example()
     for f in FIELDS:
         assert f"# {f.name} = " in text
+
+
+def test_output_never_crashes_on_legacy_code_pages():
+    import io
+
+    from ytdlui.cli import make_output_safe
+    raw = io.BytesIO()
+    stream = io.TextIOWrapper(raw, encoding="cp1252")
+    make_output_safe(stream)
+    print("yt-dlp 2025.04.30 → 2026.10.26  ➜  http://localhost:5000", file=stream, flush=True)
+    assert b"2026.10.26" in raw.getvalue()

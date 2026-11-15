@@ -11,6 +11,20 @@ import time
 from . import __version__
 
 
+def make_output_safe(*streams) -> None:
+    """Never crash on characters the console can't show.
+
+    When output is redirected on Windows (services, scheduled tasks, CI), Python falls back
+    to a legacy code page such as cp1252, and printing e.g. "→" raised UnicodeEncodeError
+    during startup. Unencodable characters are now replaced instead.
+    """
+    for stream in streams or (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
+
+
 def _setup_logging() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-7s  %(message)s",
                         datefmt="%H:%M:%S")
@@ -72,6 +86,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    make_output_safe()
     if argv[:1] == ["--run-ytdlp"]:
         return _run_ytdlp(argv[1:])
 
@@ -180,7 +195,7 @@ def main(argv: list[str] | None = None) -> int:
     t = svc.ytdlp.tools
     print()
     print(f"  YTDL-UI {__version__}")
-    print(f"  ➜  {url}")
+    print(f"  ->  {url}")
     print(f"  yt-dlp {svc.ytdlp.version() or 'missing'} [{t.ytdlp_kind}] · ffmpeg "
           f"{'ok' if t.ffmpeg else 'missing'} · JS runtime {t.js_runtime or 'none'} · "
           f"processing: {settings.processing_mode}")

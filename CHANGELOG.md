@@ -10,6 +10,12 @@
   Set it in `config.ini`, with `YTDLUI_BANDWIDTH_LIMIT`, or `--set bandwidth_limit=25`; decimals work.
 - Admin panel shows the cap and how fast the server is sending right now.
 
+### Fixed
+- Windows: the server crashed at startup when its output wasn't a console window (Windows services,
+  scheduled tasks, redirected logs, CI) because the startup banner contained a character the legacy
+  code page can't print. Console output now never crashes on unprintable characters. This blocked
+  the v2.0.0 Windows builds, so 2.1.0 is the first v2 release with Windows apps.
+
 ## [2.0.0] — 2026-11-15
 
 A ground-up refresh: background downloads with real progress, optional in-browser processing,
