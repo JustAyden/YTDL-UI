@@ -1,6 +1,6 @@
 # YTDL-UI
 
-A clean, self-hosted web UI for downloading video and audio from YouTube and 1,800+ other sites — powered by [yt-dlp](https://github.com/yt-dlp/yt-dlp) and [ffmpeg](https://ffmpeg.org). No accounts, no tracking, no ads.
+A clean, self-hosted web UI for downloading video and audio from YouTube and 1,800+ other sites — powered by [yt-dlp](https://github.com/yt-dlp/yt-dlp) and [ffmpeg](https://ffmpeg.org). No accounts, no tracking, no ads — [privacy](PRIVACY.md).
 
 [![CI](https://github.com/JustAyden/YTDL-UI/actions/workflows/ci.yml/badge.svg)](https://github.com/JustAyden/YTDL-UI/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/JustAyden/YTDL-UI?label=release)](https://github.com/JustAyden/YTDL-UI/releases/latest)
@@ -148,6 +148,7 @@ The ones you're most likely to want:
 | `allowed_sites` | *(any)* | e.g. `youtube.com, youtu.be, soundcloud.com` |
 | `cookies_file` | *(none)* | A `cookies.txt` for age-restricted videos and YouTube's "confirm you're not a bot". |
 | `ytdlp_auto_update` | `true` | Keep yt-dlp current. |
+| `privacy_contact` | *(none)* | Email or link shown on the `/privacy` page so visitors can reach you. |
 
 ```bash
 python server.py --help          # all command-line options
@@ -178,6 +179,7 @@ After that, logging in needs the password **and** a 6-digit code (or a recovery 
 - Downloads run as background jobs, so long playlists work fine behind proxies with short timeouts (Cloudflare's is 100 s).
 - Set `password` for a private instance (it gets the same lockout protection), and consider `processing_mode = browser` to keep CPU and disk usage near zero.
 - `bandwidth_limit` (10 MB/s by default) keeps downloads from saturating the server's connection — raise it on a fast link, lower it on a home connection you share.
+- Every instance has a **privacy page at `/privacy`**, generated from its live settings (what's logged, how long files are kept, which third parties are involved). Set `privacy_contact` so visitors know how to reach you, and read [PRIVACY.md](PRIVACY.md) for what else to consider.
 - `sudo sh install.sh` sets up a hardened systemd service (dedicated user, read-only system, restricted syscalls). See **[SETUP.md](SETUP.md)** for a full Debian + Caddy walkthrough, Cloudflare Tunnel and Docker examples.
 
 ---

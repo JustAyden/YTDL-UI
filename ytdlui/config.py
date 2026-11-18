@@ -61,6 +61,9 @@ FIELDS: tuple[Field, ...] = (
           "Where temp downloads, caches and update state live (relative to the app folder)."),
     Field("log_urls", "server", bool, False,
           "Log the full URL of every download. Off by default: only the site is logged."),
+    Field("privacy_contact", "server", str, "",
+          "How visitors can reach you about privacy (an email address or a link), shown on "
+          "the /privacy page. Empty = no contact is listed."),
 
     # ── security ──────────────────────────────────────────────────────────
     Field("password", "security", str, "",
@@ -353,6 +356,7 @@ ADMIN_EDITABLE: dict[str, tuple[bool, bool]] = {
     "allow_web_update": (True, True),
     "ui_accent": (True, False),
     "ui_style": (True, False),
+    "privacy_contact": (True, False),
     "ytdlp_auto_update": (True, False),
     "ytdlp_channel": (True, False),
     "ffmpeg_auto_install": (False, False),

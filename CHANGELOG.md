@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+### New
+- **Privacy page** at `/privacy`, linked from the footer, Settings → About and the password screen.
+  It's generated from the server's live settings, so it tells visitors what *this* server does: what
+  it receives and logs, how long files are kept, where downloads are processed, which third parties
+  are involved (jsDelivr, a reverse proxy or Cloudflare when `trust_proxy` says so), and the cookies
+  and browser storage it uses. Readable before signing in on password-protected servers.
+- `privacy_contact` setting (also in Admin console → Settings → Server): an email address or link
+  shown on the privacy page.
+- [`PRIVACY.md`](PRIVACY.md) in the repository: the same information for the software in general,
+  plus notes for people hosting a public instance.
+
 ## [2.4.0] — 2026-11-15
 
 ### New

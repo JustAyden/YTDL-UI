@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="What this YTDL-UI server does with your data.">
+  <title>Privacy — YTDL-UI</title>
+  <link rel="icon" href="static/img/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="static/css/theme.css?v={{version}}">
+  <link rel="stylesheet" href="static/css/app.css?v={{version}}">
+  <script src="static/js/theme-boot.js?v={{version}}"></script>
+  <script type="module" src="static/js/privacy.js?v={{version}}"></script>
+  <style>
+    .doc { max-width: 760px; margin: 0 auto; padding: 8px 16px 32px; display: flex; flex-direction: column; gap: 16px; }
+    @media (min-width: 600px) { .doc { padding: 16px 24px 40px; } }
+    .doc-hero { padding: 24px 8px 8px; }
+    .doc-hero h1 { font-size: clamp(40px, 7vw, 57px); line-height: 1.1; font-weight: 700; font-stretch: 115%; letter-spacing: -1px; }
+    .doc-hero p { margin-top: 12px; color: var(--md-sys-color-on-surface-variant); max-width: 600px; }
+    .doc .card h2 { display: flex; align-items: center; gap: 12px; font-size: 22px; line-height: 28px; font-weight: 500;
+      font-stretch: 105%; margin: 0 0 12px; }
+    .doc .card h2 .msr { color: var(--md-sys-color-primary); }
+    .doc .card h3 { font-size: 14px; line-height: 20px; font-weight: 500; letter-spacing: 0.1px;
+      color: var(--md-sys-color-primary); margin: 16px 0 4px; }
+    .doc .card p, .doc .card li { font-size: 15px; line-height: 23px; letter-spacing: 0.25px; }
+    .doc .card p + p, .doc .card p + ul, .doc .card ul + p { margin-top: 10px; }
+    .doc .card ul { padding-left: 22px; display: flex; flex-direction: column; gap: 6px; }
+    .doc .card li::marker { color: var(--md-sys-color-primary); }
+    .doc code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.9em;
+      background: var(--md-sys-color-surface-container-highest); padding: 1px 6px; border-radius: 6px; }
+    .doc .tldr { background: var(--md-sys-color-primary-container); color: var(--md-sys-color-on-primary-container); }
+    .doc .tldr h2 .msr, .doc .tldr li::marker { color: inherit; }
+    .doc .mode { background: var(--md-sys-color-surface-bright); border-radius: var(--md-shape-l-inc, 16px); padding: 12px 16px; margin-bottom: 12px; }
+    .doc-meta { text-align: center; font-size: 13px; line-height: 20px; color: var(--md-sys-color-on-surface-variant); padding: 8px 16px 40px; }
+    .doc-meta a { font-weight: 500; text-decoration: none; }
+    .doc-meta a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+
+<header class="appbar">
+  <a class="brand" href="./" aria-label="Back to YTDL-UI">
+    <span class="brand-shape" aria-hidden="true"><span class="msr">download</span></span>
+    <span class="brand-name">YTDL-UI</span>
+  </a>
+  <a class="icon-btn sl" href="./" title="Back to YTDL-UI" aria-label="Back to YTDL-UI"><span class="msr">close</span></a>
+</header>
+
+<main class="doc">
+  <section class="doc-hero">
+    <h1>Privacy</h1>
+    <p>What this YTDL-UI server does with your data. This page is generated from the server's current
+      settings, so it describes this server — not just the software in general.</p>
+  </section>
+
+  <section class="card tldr" aria-labelledby="h-short">
+    <h2 id="h-short"><span class="msr">bolt</span>The short version</h2>
+    <ul>
+      <li>No accounts, ads, analytics or tracking.</li>
+      <li>The server sees the links you paste and your IP address, and uses them only to run your
+        downloads and to stop abuse.</li>
+      <li>Files downloaded on the server are deleted {{ttl}} after they finish, or as soon as you
+        remove them from your list.</li>
+      <li>Your settings and download list are stored in your browser, not on the server.</li>
+    </ul>
+  </section>
+
+  <section class="card" aria-labelledby="h-receives">
+    <h2 id="h-receives"><span class="msr">dns</span>What the server receives</h2>
+    <ul>
+      <li><strong>The link you paste and the options you pick</strong> (format, quality, which playlist
+        items), so it can look up and download the media. They're kept in memory with the download and
+        deleted with it.</li>
+      <li><strong>Your IP address</strong>, which every website receives. YTDL-UI uses it to rate-limit
+        requests and to cap how many downloads one visitor can run at once. It's kept in memory only —
+        for about a minute for rate limits, and with each server download until that download is
+        deleted — and forgotten when the server restarts.</li>
+      <li><strong>Failed sign-ins.</strong> If a wrong password is entered (site or admin), your IP
+        address and the number of failed attempts are saved on the server's disk, so lockouts survive
+        a restart. The entry is removed when you sign in successfully, or a day after the last failed
+        attempt once any lockout has ended.</li>
+    </ul>
+  </section>
+
+  <section class="card" aria-labelledby="h-processing">
+    <h2 id="h-processing"><span class="msr">devices</span>Where your downloads are processed</h2>
+    <p class="mode">{{mode}}</p>
+    <h3>On the server</h3>
+    <p>The media is downloaded to the server's disk, converted there, and kept until you save it.
+      Finished files are deleted {{ttl}} after they finish. Cancelled and failed downloads are deleted
+      straight away, and removing a download from your list deletes it immediately.</p>
+    <h3>On your device</h3>
+    <p>The server only asks yt-dlp which streams to fetch. Your browser downloads and converts them,
+      and the finished file never touches the server's disk.</p>
+  </section>
+
+  <section class="card" aria-labelledby="h-logs">
+    <h2 id="h-logs"><span class="msr">history</span>What gets logged</h2>
+    <p>YTDL-UI doesn't keep an access log of the pages you open or the requests you make. Its log
+      records:</p>
+    <ul>
+      <li>each download processed on the server: format, quality and {{log_line}};</li>
+      <li>error messages when a download fails, which can include the video's ID on that site;</li>
+      <li>admin sign-ins, failed sign-ins and lockouts, with the IP address.</li>
+    </ul>
+    <p>Where that log is kept, and for how long, is up to whoever runs this server.</p>
+  </section>
+
+  <section class="card" aria-labelledby="h-who">
+    <h2 id="h-who"><span class="msr">admin_panel_settings</span>Who can see it</h2>
+    <ul>
+      <li>This server's admin can see the downloads currently on the server — title, site, format and
+        the IP address that started each one — until they're deleted, plus any locked-out IP
+        addresses.</li>
+      <li>YTDL-UI is open-source software. Its authors don't run this server and receive no data
+        from it.</li>
+    </ul>
+  </section>
+
+  <section class="card" aria-labelledby="h-third">
+    <h2 id="h-third"><span class="msr">language</span>Other services involved</h2>
+    <h3>Your browser may contact</h3>
+    <ul>
+      <li><strong>The media site's image server</strong>, to show a video's thumbnail. It sees your IP
+        address; your browser doesn't tell it which page you're on.</li>
+      {{direct}}
+      {{wasm}}
+    </ul>
+    <h3>This server contacts</h3>
+    <ul>
+      <li><strong>The media site</strong>, through yt-dlp{{via_proxy}}, to look up and download what
+        you asked for. The site sees this server's IP address, not yours.</li>
+      <li><strong>GitHub</strong> and the <strong>Python Package Index</strong>, to check for and
+        download updates to YTDL-UI, yt-dlp and ffmpeg. No visitor data is included.</li>
+    </ul>
+  </section>
+
+  {{proxy_section}}
+
+  <section class="card" aria-labelledby="h-device">
+    <h2 id="h-device"><span class="msr">lock</span>Cookies and storage on your device</h2>
+    <p>{{cookie}}</p>
+    <p>Your browser also keeps these in its local storage for this site. They stay on your device —
+      only download IDs are sent back, to check on a download's progress:</p>
+    <ul>
+      <li>your theme, color and other Settings;</li>
+      <li>your last-used format and quality;</li>
+      <li>your list of recent server downloads (up to 30: title, thumbnail link, format), so it
+        survives a reload.</li>
+    </ul>
+    <p>Settings → <em>Clear download list</em> removes the list. Clearing this site's data in your
+      browser removes everything.</p>
+  </section>
+
+  <section class="card" aria-labelledby="h-contact">
+    <h2 id="h-contact"><span class="msr">info</span>Contact</h2>
+    {{contact}}
+  </section>
+</main>
+
+<p class="doc-meta">
+  Generated by YTDL-UI {{version}} from this server's settings
+  · <a href="https://github.com/JustAyden/YTDL-UI/blob/main/PRIVACY.md" target="_blank" rel="noopener">About this page</a>
+  · <a href="./">Back to YTDL-UI</a>
+</p>
+
+</body>
+</html>

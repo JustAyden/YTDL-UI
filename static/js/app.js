@@ -890,8 +890,9 @@ const SETTING_LABELS = {
   password: "Site password (visitors)", allow_private_urls: "Allow private/LAN URLs",
   allow_web_update: "Allow updates from this panel", ytdlp_auto_update: "Auto-update yt-dlp",
   ytdlp_channel: "yt-dlp channel", ffmpeg_auto_install: "Auto-install ffmpeg", update_check: "Check for YTDL-UI updates",
+  privacy_contact: "Privacy contact (email or link)",
 };
-const SECTION_TITLES = { processing: "Processing", limits: "Limits", security: "Access & security", updates: "Updates" };
+const SECTION_TITLES = { server: "Server", processing: "Processing", limits: "Limits", security: "Access & security", updates: "Updates" };
 const CHOICE_LABELS = {
   server: "Server", browser: "Visitor's device", choice: "Let visitors choose", auto: "Auto (device if capable)",
   stable: "Stable", nightly: "Nightly",

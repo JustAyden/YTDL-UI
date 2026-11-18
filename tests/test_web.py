@@ -141,6 +141,42 @@ def test_password_gate(settings):
     assert b"id=\"url-form\"" in c.get("/").data
 
 
+def test_privacy_page_reflects_settings(client, app):
+    r = client.get("/privacy")
+    assert r.status_code == 200 and r.mimetype == "text/html"
+    page = r.get_data(as_text=True)
+    assert "{{" not in page and "Content-Security-Policy" in r.headers
+    assert "deleted 30 minutes after they finish" in page
+    assert "site name only" in page and "jsDelivr" in page
+    assert "Visitors don't get any cookies" in page and "hasn't listed a contact" in page
+    assert "In front of this server" not in page                     # trust_proxy = 0
+    # the claim above must hold: browsing anonymously never sets a cookie
+    for path in ("/", "/privacy", "/api/config"):
+        assert "Set-Cookie" not in client.get(path).headers
+
+    s = app.extensions["ytdlui"].settings
+    s.job_ttl_minutes, s.log_urls, s.trust_proxy = 120, True, "cloudflare"
+    s.processing_mode, s.wasm_source = "server", "cdn"
+    s.privacy_contact = 'me@example.com"><script>'
+    page = client.get("/privacy").get_data(as_text=True)
+    assert "deleted 2 hours after they finish" in page and "full link" in page
+    assert "Cloudflare" in page and "jsDelivr" not in page
+    assert "<script>" not in page and "hasn't listed a contact" not in page   # escaped, not linked
+    s.privacy_contact = "privacy@example.com"
+    assert 'href="mailto:privacy@example.com"' in client.get("/privacy").get_data(as_text=True)
+    s.privacy_contact = "javascript:alert(1)"
+    assert 'href="javascript' not in client.get("/privacy").get_data(as_text=True)
+
+
+def test_privacy_page_is_public_on_private_servers(settings):
+    settings.password = "s3cret"
+    c = make_app(settings).test_client()
+    page = c.get("/privacy").get_data(as_text=True)
+    assert "What the server receives" in page and "password-protected" in page
+    assert c.get("/static/js/privacy.js").status_code == 200
+    assert 'href="privacy"' in c.get("/").get_data(as_text=True)    # linked from the password screen
+
+
 def test_admin_disabled(settings):
     settings.admin_enabled = False
     c = make_app(settings).test_client()

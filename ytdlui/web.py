@@ -19,6 +19,7 @@ from . import __version__
 from .config import (ADMIN_EDITABLE, APP_DIR, FIELD_MAP, ConfigError, Settings, coerce_setting,
                      read_admin_overrides, write_admin_overrides)
 from .jobs import JobManager, JobRejected
+from . import privacy
 from .relay import FallbackNeeded, Relay, RelayError, TokenStore, resolve
 from .auth import (AdminStore, LoginGuard, password_problem, qr_svg_data_uri, totp_uri)
 from .security import RateLimiter, URLRejected, check_url, safe_equals
@@ -44,8 +45,8 @@ FFMPEG_CORE_FILES = {
 FFMPEG_CDN = f"https://cdn.jsdelivr.net/npm/@ffmpeg/core@{FFMPEG_CORE_VERSION}/dist/esm/"
 
 OPEN_PATHS = ("/api/health", "/api/login", "/static/css/", "/static/img/", "/static/fonts/", "/static/js/login.js",
-              "/static/js/theme-boot.js", "/static/js/shapes.js",
-              "/manifest.webmanifest", "/favicon.ico")
+              "/static/js/theme-boot.js", "/static/js/shapes.js", "/static/js/privacy.js",
+              "/manifest.webmanifest", "/favicon.ico", "/privacy")
 
 
 class Services:
@@ -205,6 +206,8 @@ def create_app(settings: Settings, start_background: bool = True) -> Flask:
         index_html = fh.read().replace("__VERSION__", __version__)
     with open(os.path.join(STATIC_DIR, "login.html"), encoding="utf-8") as fh:
         login_html = fh.read().replace("__VERSION__", __version__)
+    with open(os.path.join(STATIC_DIR, "privacy.html"), encoding="utf-8") as fh:
+        privacy_template = fh.read()
 
     # ── helpers ─────────────────────────────────────────────────────────
     def throttled(resp: Response) -> Response:
@@ -306,6 +309,12 @@ def create_app(settings: Settings, start_background: bool = True) -> Flask:
     @app.get("/")
     def index() -> Response:
         return Response(index_html, mimetype="text/html", headers={"Cache-Control": "no-cache"})
+
+    @app.get("/privacy")
+    def privacy_page() -> Response:
+        # Rendered per request: admins can change the settings it describes without a restart.
+        return Response(privacy.render(privacy_template, settings, __version__), mimetype="text/html",
+                        headers={"Cache-Control": "no-cache"})
 
     @app.get("/manifest.webmanifest")
     def manifest() -> Response:
