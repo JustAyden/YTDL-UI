@@ -30,6 +30,9 @@
       background: var(--md-sys-color-surface-container-highest); padding: 1px 6px; border-radius: 6px; }
     .doc .tldr { background: var(--md-sys-color-primary-container); color: var(--md-sys-color-on-primary-container); }
     .doc .tldr h2 .msr, .doc .tldr li::marker { color: inherit; }
+    .doc .notes h3:first-of-type { margin-top: 4px; }
+    .doc .notes ul { margin-top: 6px; }
+    .doc .notes p + h3, .doc .notes ul + h3 { margin-top: 16px; }
     .doc .mode { background: var(--md-sys-color-surface-bright); border-radius: var(--md-shape-l-inc, 16px); padding: 12px 16px; margin-bottom: 12px; }
     .doc-meta { text-align: center; font-size: 13px; line-height: 20px; color: var(--md-sys-color-on-surface-variant); padding: 8px 16px 40px; }
     .doc-meta a { font-weight: 500; text-decoration: none; }
@@ -65,8 +68,10 @@
     </ul>
   </section>
 
+  {{notes}}
+
   <section class="card" aria-labelledby="h-receives">
-    <h2 id="h-receives"><span class="msr">dns</span>What the server receives</h2>
+    <h2 id="h-receives"><span class="msr">download</span>What the server receives</h2>
     <ul>
       <li><strong>The link you paste and the options you pick</strong> (format, quality, which playlist
         items), so it can look up and download the media. They're kept in memory with the download and

@@ -2,7 +2,7 @@
 
 YTDL-UI is self-hosted software. **The people who make it don't run your server and receive no data from it.** There are no accounts, ads, analytics or tracking.
 
-Every running instance has a privacy page at **`/privacy`** (linked in the footer, in ⚙ Settings → About, and on the password screen). It's generated from that server's live settings, so visitors see what *that* server does, not just the defaults. This document explains the same things for the software in general, and what you should know if you host it for other people.
+Every running instance has a privacy page at **`/privacy`** (linked in the footer, in ⚙ Settings → About, and on the password screen). It's generated from that server's live settings, so visitors see what *that* server does, not just the defaults — plus, optionally, the operator's own policy from `data/privacy.md`. This document explains the same things for the software in general, and what you should know if you host it for other people.
 
 ---
 
@@ -54,6 +54,7 @@ Fonts, icons and the app's own scripts are served by YTDL-UI itself; browsers ne
 ## If you host YTDL-UI for other people
 
 - **Set `privacy_contact`** (admin console → Settings → Server, or `config.ini`) to an email address or link, so visitors know how to reach you. It's shown on `/privacy`.
+- **Add your own policy** — who runs the server, how long you keep logs, your legal basis — by copying [`privacy.example.md`](privacy.example.md) to `data/privacy.md` (Docker: `/app/data/privacy.md`) and editing it. It appears as an "About this server" card at the top of `/privacy`, above the generated sections. Because it lives in your data folder, updates never overwrite it and it never ends up in the repository or a release (change the location with `privacy_notes`). It supports a small, safe Markdown subset; HTML is shown as text.
 - Leave **`log_urls`** off unless you need it.
 - **Your reverse proxy or CDN keeps its own logs.** If you set `trust_proxy`, the privacy page tells visitors a proxy is in front (and names Cloudflare when `trust_proxy = cloudflare`). Links shared into the app from another app arrive in the page address (`/?url=…`), so they can show up in those logs.
 - `processing_mode = browser` with `fallback_to_server = false` means the server never stores visitors' files.

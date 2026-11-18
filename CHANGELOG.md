@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [2.5.0] — 2026-11-17
 
 ### New
 - **Privacy page** at `/privacy`, linked from the footer, Settings → About and the password screen.
@@ -8,10 +8,17 @@
   it receives and logs, how long files are kept, where downloads are processed, which third parties
   are involved (jsDelivr, a reverse proxy or Cloudflare when `trust_proxy` says so), and the cookies
   and browser storage it uses. Readable before signing in on password-protected servers.
+- **Your own privacy policy, kept out of the code.** Copy
+  [`privacy.example.md`](https://github.com/JustAyden/YTDL-UI/blob/main/privacy.example.md) to
+  `data/privacy.md` (Docker: `/app/data/privacy.md`) to add who runs the server, how long you keep
+  logs and your legal basis. It's shown as an "About this server" card at the top of `/privacy`.
+  It lives in your data folder, so updates never overwrite it. It supports a small, safe Markdown
+  subset, and HTML is shown as text. The `privacy_notes` setting changes its location.
 - `privacy_contact` setting (also in Admin console → Settings → Server): an email address or link
   shown on the privacy page.
-- [`PRIVACY.md`](PRIVACY.md) in the repository: the same information for the software in general,
-  plus notes for people hosting a public instance.
+- [`PRIVACY.md`](https://github.com/JustAyden/YTDL-UI/blob/main/PRIVACY.md) in the repository: the
+  same information for the software in general, plus a checklist for people hosting a public
+  instance.
 
 ## [2.4.0] — 2026-11-15
 

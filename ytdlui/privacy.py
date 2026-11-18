@@ -2,16 +2,104 @@
 
 Everything stated here must match what the code actually does. If you change what is logged,
 stored or sent anywhere, update this file and PRIVACY.md in the same change.
+
+Operators add their own notes (who runs the server, log retention, which laws apply) in a Markdown
+file in their data folder, so those never end up in the repository or a release.
 """
 
 from __future__ import annotations
 
+import os
 import re
 from html import escape
 
 from .config import Settings
 
 _EMAIL = re.compile(r"[^@\s<>\"']+@[^@\s<>\"']+\.[^@\s<>\"']+")
+NOTES_MAX_BYTES = 64 * 1024
+
+# Inline Markdown the operator's notes may use: `code`, [text](https://… or mailto:…), **bold**,
+# and bare https:// links or email addresses. Everything else is shown as plain, escaped text.
+_INLINE = re.compile(
+    r"`(?P<code>[^`]+)`"
+    r"|\[(?P<text>[^\]]+)\]\((?P<href>(?:https?://|mailto:)[^\s)]+)\)"
+    r"|\*\*(?P<bold>.+?)\*\*"
+    r"|(?P<url>https?://[^\s<>()\[\]]*[^\s<>()\[\].,;:!?'\"])"
+    r"|(?P<email>[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[A-Za-z]{2,})")
+
+
+def _inline(text: str) -> str:
+    out, pos = [], 0
+    for m in _INLINE.finditer(text):
+        out.append(escape(text[pos:m.start()]))
+        if m["code"] is not None:
+            out.append(f"<code>{escape(m['code'])}</code>")
+        elif m["href"] is not None:
+            out.append(f'<a href="{escape(m["href"])}" rel="noopener nofollow" target="_blank">'
+                       f"{escape(m['text'])}</a>")
+        elif m["bold"] is not None:
+            out.append(f"<strong>{escape(m['bold'])}</strong>")
+        elif m["url"] is not None:
+            out.append(f'<a href="{escape(m["url"])}" rel="noopener nofollow" target="_blank">'
+                       f"{escape(m['url'])}</a>")
+        else:
+            out.append(f'<a href="mailto:{escape(m["email"])}">{escape(m["email"])}</a>')
+        pos = m.end()
+    out.append(escape(text[pos:]))
+    return "".join(out)
+
+
+def render_notes(md: str) -> str:
+    """A small, safe Markdown subset: headings, paragraphs, bullet lists and the inline forms above.
+
+    Raw HTML is never passed through; it shows up as text.
+    """
+    out: list[str] = []
+    para: list[str] = []
+    items: list[str] = []
+
+    def flush() -> None:
+        if para:
+            out.append(f"<p>{_inline(' '.join(para))}</p>")
+            para.clear()
+        if items:
+            out.append("<ul>" + "".join(f"<li>{_inline(i)}</li>" for i in items) + "</ul>")
+            items.clear()
+
+    md = re.sub(r"<!--.*?(?:-->|\Z)", "", md, flags=re.S)      # <!-- comments --> are for the operator
+    for line in md.splitlines():
+        text = line.strip()
+        if not text:
+            flush()
+        elif (m := re.match(r"#{1,6}\s+(.*)", text)):
+            flush()
+            out.append(f"<h3>{_inline(m.group(1))}</h3>")
+        elif (m := re.match(r"[-*]\s+(.*)", text)):
+            if para:
+                flush()
+            items.append(m.group(1))
+        elif items and line[:1].isspace():          # an indented line continues the list item
+            items[-1] += " " + text
+        else:
+            if items:
+                flush()
+            para.append(text)
+    flush()
+    return "\n".join(out)
+
+
+def load_notes(s: Settings) -> str:
+    """The operator's own notes (``privacy_notes``, by default data/privacy.md) as HTML, or ''."""
+    path = str(s.privacy_notes or "").strip()
+    if not path:
+        return ""
+    if not os.path.isabs(path):
+        path = os.path.join(s.data_path, path)
+    try:
+        with open(path, encoding="utf-8-sig", errors="replace") as fh:
+            return render_notes(fh.read(NOTES_MAX_BYTES))
+    except OSError:
+        return ""
 
 
 def _contact_html(raw: str) -> str:
@@ -94,6 +182,11 @@ def render(template: str, s: Settings, version: str) -> str:
                   "<code>ytdlui_session</code>, that keeps you signed in for 30 days.")
     cookie += " It only records that you're signed in and isn't used to track you."
 
+    notes = load_notes(s)
+    if notes:
+        notes = ('<section class="card notes" aria-labelledby="h-notes"><h2 id="h-notes">'
+                 '<span class="msr">dns</span>About this server</h2>' + notes + "</section>")
+
     contact = _contact_html(s.privacy_contact)
     contact_html = (f"<p>Questions about this server? Contact its operator: {contact}.</p>" if contact
                     else "<p>The operator of this server hasn't listed a contact.</p>")
@@ -107,6 +200,7 @@ def render(template: str, s: Settings, version: str) -> str:
         "wasm": wasm,
         "direct": direct,
         "proxy_section": proxy,
+        "notes": notes,
         "cookie": cookie,
         "contact": contact_html,
         "via_proxy": via_proxy,

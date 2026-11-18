@@ -64,6 +64,11 @@ FIELDS: tuple[Field, ...] = (
     Field("privacy_contact", "server", str, "",
           "How visitors can reach you about privacy (an email address or a link), shown on "
           "the /privacy page. Empty = no contact is listed."),
+    Field("privacy_notes", "server", str, "privacy.md",
+          "Markdown file with your own notes for the /privacy page (who runs this server, how "
+          "long you keep logs, which laws apply), shown above the generated sections. Relative "
+          "paths are inside the data folder, so updates never touch it. Missing = nothing extra. "
+          "See privacy.example.md."),
 
     # ── security ──────────────────────────────────────────────────────────
     Field("password", "security", str, "",

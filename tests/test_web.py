@@ -1,4 +1,5 @@
 import io
+import os
 import time
 import zipfile
 
@@ -166,6 +167,28 @@ def test_privacy_page_reflects_settings(client, app):
     assert 'href="mailto:privacy@example.com"' in client.get("/privacy").get_data(as_text=True)
     s.privacy_contact = "javascript:alert(1)"
     assert 'href="javascript' not in client.get("/privacy").get_data(as_text=True)
+
+
+def test_privacy_operator_notes_from_data_folder(client, app):
+    s = app.extensions["ytdlui"].settings
+    assert "About this server" not in client.get("/privacy").get_data(as_text=True)
+    with open(os.path.join(s.data_path, "privacy.md"), "w", encoding="utf-8") as fh:
+        fh.write("<!-- SECRET-NOTE -->\n## Who runs this\n\nRun by **Acme**. <b>x</b> "
+                 "[bad](javascript:alert(1)) [site](https://acme.example) ops@example.com\n"
+                 "- logs: 7 days\n- proxy: none\n")
+    page = client.get("/privacy").get_data(as_text=True)
+    assert "About this server" in page and "<h3>Who runs this</h3>" in page
+    assert "<strong>Acme</strong>" in page and "<li>logs: 7 days</li>" in page
+    assert 'href="https://acme.example"' in page and 'href="mailto:ops@example.com"' in page
+    assert "SECRET-NOTE" not in page and "<b>" not in page and 'href="javascript' not in page
+
+
+def test_privacy_example_file_renders():
+    from ytdlui.privacy import render_notes
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    with open(os.path.join(root, "privacy.example.md"), encoding="utf-8") as fh:
+        html = render_notes(fh.read())
+    assert html.startswith("<h3>") and "<!--" not in html and "Copy this file" not in html
 
 
 def test_privacy_page_is_public_on_private_servers(settings):

@@ -179,7 +179,7 @@ After that, logging in needs the password **and** a 6-digit code (or a recovery 
 - Downloads run as background jobs, so long playlists work fine behind proxies with short timeouts (Cloudflare's is 100 s).
 - Set `password` for a private instance (it gets the same lockout protection), and consider `processing_mode = browser` to keep CPU and disk usage near zero.
 - `bandwidth_limit` (10 MB/s by default) keeps downloads from saturating the server's connection — raise it on a fast link, lower it on a home connection you share.
-- Every instance has a **privacy page at `/privacy`**, generated from its live settings (what's logged, how long files are kept, which third parties are involved). Set `privacy_contact` so visitors know how to reach you, and read [PRIVACY.md](PRIVACY.md) for what else to consider.
+- Every instance has a **privacy page at `/privacy`**, generated from its live settings (what's logged, how long files are kept, which third parties are involved). Set `privacy_contact` so visitors know how to reach you, and add your own policy (who runs the server, log retention, legal basis) by copying [`privacy.example.md`](privacy.example.md) to `data/privacy.md` — it lives in your data folder, so it survives updates and stays out of the repository. See [PRIVACY.md](PRIVACY.md) for what else to consider.
 - `sudo sh install.sh` sets up a hardened systemd service (dedicated user, read-only system, restricted syscalls). See **[SETUP.md](SETUP.md)** for a full Debian + Caddy walkthrough, Cloudflare Tunnel and Docker examples.
 
 ---
